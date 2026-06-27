@@ -1,0 +1,4 @@
+.agents/
+dist/
+node_modules/
+plan.md

@@ -1,0 +1,39 @@
+{
+  "name": "opencode-session-janitor",
+  "version": "0.1.0",
+  "description": "Safe retention cleanup tool for OpenCode sessions.",
+  "type": "module",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "lint": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "format": "prettier --check .",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.17.11",
+    "@opencode-ai/sdk": "^1.17.11"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.2",
+    "prettier": "^3.7.4",
+    "typescript": "^5.8.2",
+    "vitest": "^4.0.15"
+  }
+}
