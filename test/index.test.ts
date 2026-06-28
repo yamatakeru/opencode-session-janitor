@@ -29,7 +29,7 @@ describe("SessionJanitorPlugin", () => {
     );
   });
 
-  it("runs a startup dry-run without registering an agent-callable tool", async () => {
+  it("starts a background startup dry-run without registering an agent-callable tool", async () => {
     const client = {
       session: {
         list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
@@ -45,10 +45,13 @@ describe("SessionJanitorPlugin", () => {
 
     try {
       const hooks = await SessionJanitorPlugin(createPluginInput(client), {
+        configFile: false,
         dryRun: false,
       });
 
       expect(hooks).not.toHaveProperty("tool");
+      await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
+
       expect(client.session.list).toHaveBeenCalledOnce();
       expect(client.session.delete).not.toHaveBeenCalled();
       expect(client.app.log).toHaveBeenCalledWith(
@@ -72,7 +75,34 @@ describe("SessionJanitorPlugin", () => {
     }
   });
 
-  it("fails visibly when startup dry-run cannot be logged", async () => {
+  it("does not block plugin startup on the background dry-run", async () => {
+    let resolveList: (value: { data: [] }) => void;
+    const listCompleted = new Promise<{ data: [] }>((resolve) => {
+      resolveList = resolve;
+    });
+    const client = {
+      session: {
+        list: vi.fn(() => listCompleted),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi.fn(async () => ({ data: true })),
+      },
+    };
+
+    const hooks = await SessionJanitorPlugin(createPluginInput(client), {
+      configFile: false,
+    });
+
+    expect(hooks).not.toHaveProperty("tool");
+    expect(client.session.delete).not.toHaveBeenCalled();
+
+    resolveList!({ data: [] });
+    await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
+  });
+
+  it("does not fail plugin startup when startup dry-run cannot be logged", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const client = {
       session: {
         list: vi.fn(async () => ({ data: [] })),
@@ -80,14 +110,26 @@ describe("SessionJanitorPlugin", () => {
       },
     };
 
-    await expect(
-      SessionJanitorPlugin(createPluginInput(client)),
-    ).rejects.toThrow("Session janitor startup dry-run could not be logged");
-    expect(client.session.list).toHaveBeenCalledOnce();
-    expect(client.session.delete).not.toHaveBeenCalled();
+    try {
+      await expect(
+        SessionJanitorPlugin(createPluginInput(client), { configFile: false }),
+      ).resolves.toEqual({});
+      await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+
+      expect(client.session.list).toHaveBeenCalledOnce();
+      expect(client.session.delete).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Session janitor startup dry-run could not be logged",
+        ),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  it("fails visibly when startup dry-run evaluation fails", async () => {
+  it("does not fail plugin startup when startup dry-run evaluation fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const client = {
       session: {
         list: vi.fn(async () => ({ error: { message: "boom" } })),
@@ -98,18 +140,27 @@ describe("SessionJanitorPlugin", () => {
       },
     };
 
-    await expect(
-      SessionJanitorPlugin(createPluginInput(client)),
-    ).rejects.toThrow("Session janitor startup dry-run failed");
-    expect(client.app.log).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: expect.objectContaining({
-          level: "error",
-          message: "Session janitor failed to list sessions",
+    try {
+      await expect(
+        SessionJanitorPlugin(createPluginInput(client), { configFile: false }),
+      ).resolves.toEqual({});
+      await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
+
+      expect(client.app.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            level: "error",
+            message: "Session janitor failed to list sessions",
+          }),
         }),
-      }),
-    );
-    expect(client.session.delete).not.toHaveBeenCalled();
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Session janitor startup dry-run failed"),
+      );
+      expect(client.session.delete).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
