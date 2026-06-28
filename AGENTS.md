@@ -10,11 +10,12 @@ documentation.
 
 ## Current Scope
 
-Stage 1 is implemented: a manual OpenCode custom tool named `session_janitor`.
+Stage 1.1 is implemented: the manual `session_janitor` custom tool has been
+removed from the agent-callable surface.
 
 Implemented:
 
-- manual `session_janitor` tool
+- no agent-callable custom tool
 - dry-run evaluation
 - explicit delete mode
 - config validation
@@ -23,7 +24,7 @@ Implemented:
 
 Not implemented:
 
-- startup dry-run
+- startup dry-run hook
 - automatic deletion
 - scheduled or background cleanup
 
@@ -56,7 +57,7 @@ behavior against this API shape.
 
 ## Code Map
 
-- `src/index.ts`: plugin entrypoint and `session_janitor` tool registration.
+- `src/index.ts`: plugin entrypoint.
 - `src/config.ts`: config defaults, merging, validation, and unknown options.
 - `src/evaluate.ts`: session eligibility, age calculation, and skip reasons.
 - `src/janitor.ts`: list/evaluate/delete orchestration, logging, output, and cancellation.

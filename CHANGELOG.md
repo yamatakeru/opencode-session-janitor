@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Removed the agent-callable `session_janitor` custom tool.
+- Removed per-run tool arguments as a cleanup policy source.
+- Changed the default trigger from `manual` to `startup` for the planned hook-driven path.
+
 ## 0.1.0
 
 - Added Stage 1 manual `session_janitor` custom tool MVP.

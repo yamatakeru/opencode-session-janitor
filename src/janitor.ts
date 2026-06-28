@@ -1,7 +1,7 @@
 import type { Session } from "@opencode-ai/sdk";
 
 import { getCleanupOptions, resolveConfigFromSources } from "./config.js";
-import type { SessionJanitorConfig } from "./config.js";
+import type { SessionJanitorConfig, SessionJanitorTrigger } from "./config.js";
 import { loadSessionJanitorConfigFile } from "./config-file.js";
 import type { ConfigFileLoadResult } from "./config-file.js";
 import type { EvaluationResult } from "./evaluate.js";
@@ -42,9 +42,8 @@ export type RunSessionJanitorInput = {
   client: SessionJanitorClient;
   pluginOptions?: unknown;
   configFileBaseDir?: string;
-  toolArgs?: Partial<SessionJanitorConfig>;
   currentSessionID?: string;
-  trigger?: "manual";
+  trigger?: SessionJanitorTrigger;
   now?: number;
   abortSignal?: AbortSignal;
 };
@@ -70,9 +69,8 @@ export async function runSessionJanitor({
   client,
   pluginOptions,
   configFileBaseDir,
-  toolArgs,
   currentSessionID,
-  trigger = "manual",
+  trigger = "startup",
   now = Date.now(),
   abortSignal,
 }: RunSessionJanitorInput): Promise<RunSessionJanitorResult> {
@@ -89,11 +87,7 @@ export async function runSessionJanitor({
           errors: configFile.errors,
           warnings: [],
         }
-      : resolveConfigFromSources(
-          configFile.options,
-          pluginCleanupOptions,
-          toolArgs,
-        );
+      : resolveConfigFromSources(configFile.options, pluginCleanupOptions);
   if (!validation.ok) {
     const metadata = {
       ok: false,
@@ -360,7 +354,7 @@ export async function runSessionJanitor({
 
 function buildMetadata(input: {
   ok: boolean;
-  trigger: "manual";
+  trigger: SessionJanitorTrigger;
   mode: string;
   config: SessionJanitorConfig;
   warnings: string[];
@@ -393,7 +387,7 @@ function buildMetadata(input: {
 
 function renderCancelledResult(
   client: SessionJanitorClient,
-  trigger: "manual",
+  trigger: SessionJanitorTrigger,
   warnings: string[],
   stage: "before-list" | "after-list" | "after-evaluation",
   configFile: Record<string, unknown>,

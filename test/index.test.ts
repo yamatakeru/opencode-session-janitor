@@ -28,7 +28,7 @@ describe("SessionJanitorPlugin", () => {
     );
   });
 
-  it("registers the session_janitor custom tool", async () => {
+  it("does not register an agent-callable session_janitor custom tool", async () => {
     const client = {
       session: {
         list: vi.fn(async () => ({ data: [] })),
@@ -52,28 +52,8 @@ describe("SessionJanitorPlugin", () => {
       {},
     );
 
-    expect(hooks.tool?.session_janitor).toBeDefined();
-
-    const result = await hooks.tool?.session_janitor.execute(
-      {},
-      {
-        sessionID: "current",
-        messageID: "message",
-        agent: "agent",
-        directory: "/work/project",
-        worktree: "/work/project",
-        abort: new AbortController().signal,
-        metadata: vi.fn(),
-        ask: vi.fn(),
-      },
-    );
-
-    expect(result).toEqual(
-      expect.objectContaining({
-        title: "Session janitor dry-run",
-        output: expect.stringContaining("Mode: dry-run"),
-      }),
-    );
+    expect(hooks).not.toHaveProperty("tool");
+    expect(client.session.list).not.toHaveBeenCalled();
     expect(client.session.delete).not.toHaveBeenCalled();
   });
 });

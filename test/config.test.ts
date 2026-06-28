@@ -22,11 +22,8 @@ describe("resolveConfig", () => {
     expect(result.config.maxDeleteCount).toBe(10);
   });
 
-  it("lets tool args override plugin options", () => {
-    const result = resolveConfig(
-      { retentionDays: 90, dryRun: true },
-      { retentionDays: 7, dryRun: false },
-    );
+  it("uses plugin options as the highest-precedence runtime policy source", () => {
+    const result = resolveConfig({ retentionDays: 7, dryRun: false });
 
     expect(result.ok).toBe(true);
     if (!result.ok) {
@@ -36,21 +33,20 @@ describe("resolveConfig", () => {
     expect(result.config.dryRun).toBe(false);
   });
 
-  it("merges config file, plugin options, and tool args in order", () => {
+  it("merges config file and plugin options in order", () => {
     const result = resolveConfigFromSources(
       { retentionDays: 60, dryRun: true, maxDeleteCount: 20 },
       { retentionDays: 30, includeShared: true },
-      { retentionDays: 7, maxDeleteCount: 2 },
     );
 
     expect(result.ok).toBe(true);
     if (!result.ok) {
       throw new Error("expected config to be valid");
     }
-    expect(result.config.retentionDays).toBe(7);
+    expect(result.config.retentionDays).toBe(30);
     expect(result.config.dryRun).toBe(true);
     expect(result.config.includeShared).toBe(true);
-    expect(result.config.maxDeleteCount).toBe(2);
+    expect(result.config.maxDeleteCount).toBe(20);
   });
 
   it("does not treat configFile as a cleanup option", () => {
@@ -102,26 +98,19 @@ describe("resolveConfig", () => {
       "excludeCurrentSession must be boolean",
       "minSessionsToKeep must be a non-negative integer",
       "maxDeleteCount must be a positive integer",
-      "trigger must be one of manual, startup, or sessionIdle",
+      "trigger must be one of startup or sessionIdle",
       "allowAutoDelete must be boolean",
     ]);
   });
 
   it("rejects explicit null option objects", () => {
     const pluginResult = resolveConfig(null);
-    const toolResult = resolveConfig(undefined, null);
 
     expect(pluginResult.ok).toBe(false);
     if (pluginResult.ok) {
       throw new Error("expected plugin config to be invalid");
     }
     expect(pluginResult.errors).toEqual(["plugin options must be an object"]);
-
-    expect(toolResult.ok).toBe(false);
-    if (toolResult.ok) {
-      throw new Error("expected tool config to be invalid");
-    }
-    expect(toolResult.errors).toEqual(["tool args must be an object"]);
   });
 
   it("warns and ignores unknown options", () => {

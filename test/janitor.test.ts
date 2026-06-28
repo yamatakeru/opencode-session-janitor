@@ -308,7 +308,7 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      toolArgs: { dryRun: false },
+      pluginOptions: { dryRun: false },
       currentSessionID: "current",
       abortSignal: controller.signal,
       now: NOW,
@@ -355,7 +355,7 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      toolArgs: { dryRun: false },
+      pluginOptions: { dryRun: false },
       now: NOW,
     });
 
@@ -370,7 +370,7 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      toolArgs: { dryRun: false },
+      pluginOptions: { dryRun: false },
       currentSessionID: "current",
       now: NOW,
     });
@@ -396,7 +396,7 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      toolArgs: { dryRun: false },
+      pluginOptions: { dryRun: false },
       currentSessionID: "current",
       now: NOW,
     });
@@ -430,7 +430,7 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      toolArgs: { dryRun: false },
+      pluginOptions: { dryRun: false },
       currentSessionID: "current",
       abortSignal: controller.signal,
       now: NOW,
@@ -464,7 +464,7 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      toolArgs: { dryRun: false },
+      pluginOptions: { dryRun: false },
       currentSessionID: "current",
       abortSignal: controller.signal,
       now: NOW,
@@ -500,7 +500,7 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      toolArgs: { dryRun: false },
+      pluginOptions: { dryRun: false },
       currentSessionID: "current",
       now: NOW,
     });
@@ -521,7 +521,7 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      toolArgs: { dryRun: false },
+      pluginOptions: { dryRun: false },
       currentSessionID: "current",
       now: NOW,
     });

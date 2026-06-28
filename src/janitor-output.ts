@@ -1,4 +1,4 @@
-import type { SessionJanitorConfig } from "./config.js";
+import type { SessionJanitorConfig, SessionJanitorTrigger } from "./config.js";
 import type { EvaluationResult, SessionCandidate } from "./evaluate.js";
 
 type RenderedDeleteSuccess = {
@@ -86,7 +86,7 @@ export function renderCancelled(
 }
 
 export function renderResult(input: {
-  trigger: "manual";
+  trigger: SessionJanitorTrigger;
   mode: string;
   config: SessionJanitorConfig;
   warnings: string[];

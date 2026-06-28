@@ -1,7 +1,7 @@
 # opencode-session-janitor
 
-OpenCode plugin for cleaning up old local sessions. It provides a manual custom
-tool named `session_janitor`.
+OpenCode plugin for cleaning up old local sessions with a safe retention policy.
+It does not expose an agent-callable custom tool.
 
 The plugin is safe by default: it only performs a dry run unless you explicitly
 set `dryRun: false`.
@@ -40,31 +40,16 @@ available from the `opencode-session-janitor/api` subpath.
 
 ## Usage
 
-Ask OpenCode to run the `session_janitor` tool. With the default configuration,
-it previews sessions that would be deleted and explains why other sessions were
-skipped.
+Cleanup policy is defined only by `.opencode/session-janitor.json` and plugin
+tuple options. The plugin intentionally does not register a `session_janitor`
+custom tool, so a model cannot trigger deletion or override policy with
+generated tool arguments.
 
-You can override options for a single run:
+Startup dry-run is the next planned execution path. This version removes the
+manual tool surface but does not yet run automatically on startup.
 
-```json
-{
-  "retentionDays": 14,
-  "dryRun": true,
-  "maxDeleteCount": 5
-}
-```
-
-To actually delete sessions, run the tool with `dryRun: false`:
-
-```json
-{
-  "dryRun": false,
-  "retentionDays": 30,
-  "maxDeleteCount": 3
-}
-```
-
-Deletion is irreversible. Review a dry run before using delete mode.
+Deletion is irreversible. Keep `dryRun: true` until you have reviewed a dry-run
+summary from a supported hook-driven run.
 
 ## Configuration
 
@@ -86,7 +71,6 @@ Configuration precedence is:
 1. Built-in safe defaults.
 2. `.opencode/session-janitor.json`.
 3. OpenCode plugin tuple options.
-4. Per-run `session_janitor` tool arguments.
 
 To use a different config file, pass `configFile` as a plugin option:
 
@@ -106,14 +90,16 @@ To use a different config file, pass `configFile` as a plugin option:
 
 Set `configFile: false` to disable dedicated config file loading.
 
-| Option                  | Default | Description                                          |
-| ----------------------- | ------- | ---------------------------------------------------- |
-| `retentionDays`         | `30`    | Delete candidates must be older than this many days. |
-| `dryRun`                | `true`  | Preview only when enabled.                           |
-| `includeShared`         | `false` | Include shared sessions as delete candidates.        |
-| `excludeCurrentSession` | `true`  | Protect the currently running session.               |
-| `minSessionsToKeep`     | `0`     | Always keep at least this many newest sessions.      |
-| `maxDeleteCount`        | `10`    | Maximum sessions deleted in one run.                 |
+| Option                  | Default   | Description                                          |
+| ----------------------- | --------- | ---------------------------------------------------- |
+| `retentionDays`         | `30`      | Delete candidates must be older than this many days. |
+| `dryRun`                | `true`    | Preview only when enabled.                           |
+| `includeShared`         | `false`   | Include shared sessions as delete candidates.        |
+| `excludeCurrentSession` | `true`    | Protect the currently running session.               |
+| `minSessionsToKeep`     | `0`       | Always keep at least this many newest sessions.      |
+| `maxDeleteCount`        | `10`      | Maximum sessions deleted in one run.                 |
+| `trigger`               | `startup` | Hook-driven trigger to use in a supported stage.     |
+| `allowAutoDelete`       | `false`   | Reserved safety gate for future automatic deletion.  |
 
 Unknown options are reported as warnings. In delete mode, warnings block the run
 so a typo cannot silently delete sessions with unintended defaults.
@@ -133,7 +119,7 @@ listing or deleting sessions.
 
 ## Current Scope
 
-This version only implements the manual `session_janitor` tool. It does not run
+This version removes the manual `session_janitor` tool. It does not run
 automatically on startup and does not perform automatic deletion.
 
 ## Development

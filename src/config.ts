@@ -1,4 +1,4 @@
-export type SessionJanitorTrigger = "manual" | "startup" | "sessionIdle";
+export type SessionJanitorTrigger = "startup" | "sessionIdle";
 
 export type SessionJanitorConfig = {
   retentionDays?: number;
@@ -24,7 +24,7 @@ export const defaultSessionJanitorConfig = {
   excludeCurrentSession: true,
   minSessionsToKeep: 0,
   maxDeleteCount: 10,
-  trigger: "manual",
+  trigger: "startup",
   allowAutoDelete: false,
 } satisfies ResolvedSessionJanitorConfig;
 
@@ -52,19 +52,15 @@ const configKeys = [
 ] as const;
 
 const configKeySet = new Set<string>(configKeys);
-const triggers = new Set<string>(["manual", "startup", "sessionIdle"]);
+const triggers = new Set<string>(["startup", "sessionIdle"]);
 
-export function resolveConfig(
-  pluginOptions?: unknown,
-  toolArgs?: unknown,
-): ConfigValidationResult {
-  return resolveConfigFromSources(undefined, pluginOptions, toolArgs);
+export function resolveConfig(pluginOptions?: unknown): ConfigValidationResult {
+  return resolveConfigFromSources(undefined, pluginOptions);
 }
 
 export function resolveConfigFromSources(
   configFileOptions?: unknown,
   pluginOptions?: unknown,
-  toolArgs?: unknown,
 ): ConfigValidationResult {
   const merged: Record<string, unknown> = { ...defaultSessionJanitorConfig };
   const warnings: string[] = [];
@@ -72,7 +68,6 @@ export function resolveConfigFromSources(
 
   applyOptions(merged, warnings, errors, "config file", configFileOptions);
   applyOptions(merged, warnings, errors, "plugin options", pluginOptions);
-  applyOptions(merged, warnings, errors, "tool args", toolArgs);
 
   if (!isPositiveInteger(merged.retentionDays)) {
     errors.push("retentionDays must be a positive integer");
@@ -93,7 +88,7 @@ export function resolveConfigFromSources(
     errors.push("maxDeleteCount must be a positive integer");
   }
   if (typeof merged.trigger !== "string" || !triggers.has(merged.trigger)) {
-    errors.push("trigger must be one of manual, startup, or sessionIdle");
+    errors.push("trigger must be one of startup or sessionIdle");
   }
   if (typeof merged.allowAutoDelete !== "boolean") {
     errors.push("allowAutoDelete must be boolean");
