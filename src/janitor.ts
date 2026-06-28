@@ -1,7 +1,9 @@
 import type { Session } from "@opencode-ai/sdk";
 
-import { resolveConfig } from "./config.js";
+import { getCleanupOptions, resolveConfigFromSources } from "./config.js";
 import type { SessionJanitorConfig } from "./config.js";
+import { loadSessionJanitorConfigFile } from "./config-file.js";
+import type { ConfigFileLoadResult } from "./config-file.js";
 import type { EvaluationResult } from "./evaluate.js";
 import { evaluateSessions } from "./evaluate.js";
 import {
@@ -39,6 +41,7 @@ type LogResult =
 export type RunSessionJanitorInput = {
   client: SessionJanitorClient;
   pluginOptions?: unknown;
+  configFileBaseDir?: string;
   toolArgs?: Partial<SessionJanitorConfig>;
   currentSessionID?: string;
   trigger?: "manual";
@@ -66,13 +69,31 @@ export type RunSessionJanitorResult = {
 export async function runSessionJanitor({
   client,
   pluginOptions,
+  configFileBaseDir,
   toolArgs,
   currentSessionID,
   trigger = "manual",
   now = Date.now(),
   abortSignal,
 }: RunSessionJanitorInput): Promise<RunSessionJanitorResult> {
-  const validation = resolveConfig(pluginOptions, toolArgs);
+  const configFile = await loadSessionJanitorConfigFile({
+    baseDir: configFileBaseDir,
+    pluginOptions,
+  });
+  const configFileMetadata = buildConfigFileMetadata(configFile);
+  const pluginCleanupOptions = getCleanupOptions(pluginOptions);
+  const validation =
+    configFile.errors.length > 0
+      ? {
+          ok: false as const,
+          errors: configFile.errors,
+          warnings: [],
+        }
+      : resolveConfigFromSources(
+          configFile.options,
+          pluginCleanupOptions,
+          toolArgs,
+        );
   if (!validation.ok) {
     const metadata = {
       ok: false,
@@ -80,6 +101,7 @@ export async function runSessionJanitor({
       mode: "validation-error",
       errors: validation.errors,
       warnings: validation.warnings,
+      configFile: configFileMetadata,
     };
     return finalizeWithLog(
       client,
@@ -111,6 +133,7 @@ export async function runSessionJanitor({
       mode: "validation-error",
       errors,
       warnings,
+      configFile: configFileMetadata,
     };
     return finalizeWithLog(
       client,
@@ -135,6 +158,7 @@ export async function runSessionJanitor({
         mode,
         error: message,
         warnings,
+        configFile: configFileMetadata,
       };
       return finalizeWithLog(client, "error", "Session janitor guard failed", {
         title: "Session janitor guard failed",
@@ -147,7 +171,13 @@ export async function runSessionJanitor({
   }
 
   if (abortSignal?.aborted) {
-    return renderCancelledResult(client, trigger, warnings, "before-list");
+    return renderCancelledResult(
+      client,
+      trigger,
+      warnings,
+      "before-list",
+      configFileMetadata,
+    );
   }
 
   let sessions: Session[];
@@ -162,6 +192,7 @@ export async function runSessionJanitor({
       mode,
       error: message,
       warnings,
+      configFile: configFileMetadata,
     };
     return finalizeWithLog(
       client,
@@ -176,7 +207,13 @@ export async function runSessionJanitor({
   }
 
   if (abortSignal?.aborted) {
-    return renderCancelledResult(client, trigger, warnings, "after-list");
+    return renderCancelledResult(
+      client,
+      trigger,
+      warnings,
+      "after-list",
+      configFileMetadata,
+    );
   }
 
   let evaluation: EvaluationResult;
@@ -195,6 +232,7 @@ export async function runSessionJanitor({
       mode,
       error: message,
       warnings,
+      configFile: configFileMetadata,
     };
     return finalizeWithLog(
       client,
@@ -209,7 +247,13 @@ export async function runSessionJanitor({
   }
 
   if (abortSignal?.aborted) {
-    return renderCancelledResult(client, trigger, warnings, "after-evaluation");
+    return renderCancelledResult(
+      client,
+      trigger,
+      warnings,
+      "after-evaluation",
+      configFileMetadata,
+    );
   }
 
   if (config.dryRun) {
@@ -222,6 +266,7 @@ export async function runSessionJanitor({
       evaluation,
       deleted: [],
       failed: [],
+      configFile: configFileMetadata,
     });
     return finalizeWithLog(
       client,
@@ -287,6 +332,7 @@ export async function runSessionJanitor({
     deleted,
     failed,
     deleteAborted,
+    configFile: configFileMetadata,
   });
 
   return finalizeWithLog(
@@ -322,6 +368,7 @@ function buildMetadata(input: {
   deleted: DeleteSuccess[];
   failed: DeleteFailure[];
   deleteAborted?: string;
+  configFile: Record<string, unknown>;
 }): Record<string, unknown> {
   return {
     ok: input.ok,
@@ -329,6 +376,7 @@ function buildMetadata(input: {
     mode: input.mode,
     config: input.config,
     warnings: input.warnings,
+    configFile: input.configFile,
     totalSessions: input.evaluation.totalSessions,
     candidates: input.evaluation.candidates,
     candidateCount: input.evaluation.candidates.length,
@@ -348,6 +396,7 @@ function renderCancelledResult(
   trigger: "manual",
   warnings: string[],
   stage: "before-list" | "after-list" | "after-evaluation",
+  configFile: Record<string, unknown>,
 ): Promise<RunSessionJanitorResult> {
   const message = "Session janitor was cancelled by the user.";
   return finalizeWithLog(client, "warn", "Session janitor cancelled", {
@@ -360,8 +409,19 @@ function renderCancelledResult(
       cancellationStage: stage,
       error: message,
       warnings,
+      configFile,
     },
   });
+}
+
+function buildConfigFileMetadata(
+  configFile: ConfigFileLoadResult,
+): Record<string, unknown> {
+  return {
+    path: configFile.path,
+    loaded: configFile.loaded,
+    errors: configFile.errors,
+  };
 }
 
 async function finalizeWithLog(

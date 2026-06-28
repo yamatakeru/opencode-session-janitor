@@ -11,6 +11,10 @@ export type SessionJanitorConfig = {
   allowAutoDelete?: boolean;
 };
 
+export type SessionJanitorPluginOptions = SessionJanitorConfig & {
+  configFile?: string | false;
+};
+
 export type ResolvedSessionJanitorConfig = Required<SessionJanitorConfig>;
 
 export const defaultSessionJanitorConfig = {
@@ -54,10 +58,19 @@ export function resolveConfig(
   pluginOptions?: unknown,
   toolArgs?: unknown,
 ): ConfigValidationResult {
+  return resolveConfigFromSources(undefined, pluginOptions, toolArgs);
+}
+
+export function resolveConfigFromSources(
+  configFileOptions?: unknown,
+  pluginOptions?: unknown,
+  toolArgs?: unknown,
+): ConfigValidationResult {
   const merged: Record<string, unknown> = { ...defaultSessionJanitorConfig };
   const warnings: string[] = [];
   const errors: string[] = [];
 
+  applyOptions(merged, warnings, errors, "config file", configFileOptions);
   applyOptions(merged, warnings, errors, "plugin options", pluginOptions);
   applyOptions(merged, warnings, errors, "tool args", toolArgs);
 
@@ -104,6 +117,20 @@ export function resolveConfig(
     } as ResolvedSessionJanitorConfig,
     warnings,
   };
+}
+
+export function getCleanupOptions(value: unknown): unknown {
+  if (
+    value === undefined ||
+    value === null ||
+    !isRecord(value) ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+
+  const { configFile: _configFile, ...cleanupOptions } = value;
+  return cleanupOptions;
 }
 
 function applyOptions(

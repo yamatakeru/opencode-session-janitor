@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultSessionJanitorConfig, resolveConfig } from "../src/config.js";
+import {
+  defaultSessionJanitorConfig,
+  getCleanupOptions,
+  resolveConfig,
+  resolveConfigFromSources,
+} from "../src/config.js";
 
 describe("resolveConfig", () => {
   it("uses safe defaults", () => {
@@ -29,6 +34,49 @@ describe("resolveConfig", () => {
     }
     expect(result.config.retentionDays).toBe(7);
     expect(result.config.dryRun).toBe(false);
+  });
+
+  it("merges config file, plugin options, and tool args in order", () => {
+    const result = resolveConfigFromSources(
+      { retentionDays: 60, dryRun: true, maxDeleteCount: 20 },
+      { retentionDays: 30, includeShared: true },
+      { retentionDays: 7, maxDeleteCount: 2 },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("expected config to be valid");
+    }
+    expect(result.config.retentionDays).toBe(7);
+    expect(result.config.dryRun).toBe(true);
+    expect(result.config.includeShared).toBe(true);
+    expect(result.config.maxDeleteCount).toBe(2);
+  });
+
+  it("does not treat configFile as a cleanup option", () => {
+    const result = resolveConfig(
+      getCleanupOptions({
+        retentionDays: 14,
+        configFile: ".opencode/session-janitor.json",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("expected config to be valid");
+    }
+    expect(result.config.retentionDays).toBe(14);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("keeps invalid non-object cleanup options invalid", () => {
+    const result = resolveConfig(getCleanupOptions([]));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("expected config to be invalid");
+    }
+    expect(result.errors).toEqual(["plugin options must be an object"]);
   });
 
   it("rejects invalid values", () => {
@@ -87,5 +135,16 @@ describe("resolveConfig", () => {
     expect(result.warnings).toEqual([
       "Unknown plugin options key ignored: extra",
     ]);
+  });
+
+  it("warns and ignores unknown config file options", () => {
+    const result = resolveConfigFromSources({ retentionDays: 14, extra: true });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("expected config to be valid");
+    }
+    expect(result.config.retentionDays).toBe(14);
+    expect(result.warnings).toEqual(["Unknown config file key ignored: extra"]);
   });
 });

@@ -19,8 +19,10 @@ describe("SessionJanitorPlugin", () => {
       expect.objectContaining({
         calculateAgeDays: expect.any(Function),
         defaultSessionJanitorConfig: expect.any(Object),
+        defaultSessionJanitorConfigFile: expect.any(String),
         evaluateSessions: expect.any(Function),
         resolveConfig: expect.any(Function),
+        resolveConfigFromSources: expect.any(Function),
         runSessionJanitor: expect.any(Function),
       }),
     );

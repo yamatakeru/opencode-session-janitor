@@ -17,21 +17,23 @@ Add the plugin to your OpenCode config:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    [
-      "opencode-session-janitor",
-      {
-        "retentionDays": 30,
-        "dryRun": true,
-        "maxDeleteCount": 10
-      }
-    ]
-  ]
+  "plugin": ["opencode-session-janitor"]
 }
 ```
 
-OpenCode uses the singular top-level `plugin` key. Plugin options are passed as
-the second item in the plugin tuple.
+Then create `.opencode/session-janitor.json` in the project:
+
+```json
+{
+  "retentionDays": 30,
+  "dryRun": true,
+  "maxDeleteCount": 10
+}
+```
+
+OpenCode uses the singular top-level `plugin` key. The dedicated
+`.opencode/session-janitor.json` file keeps janitor settings separate from the
+OpenCode config schema.
 
 The package root is the OpenCode plugin entrypoint. Programmatic APIs are
 available from the `opencode-session-janitor/api` subpath.
@@ -66,6 +68,44 @@ Deletion is irreversible. Review a dry run before using delete mode.
 
 ## Configuration
 
+Recommended project config file:
+
+```json
+{
+  "retentionDays": 30,
+  "dryRun": true,
+  "includeShared": false,
+  "excludeCurrentSession": true,
+  "minSessionsToKeep": 0,
+  "maxDeleteCount": 10
+}
+```
+
+Configuration precedence is:
+
+1. Built-in safe defaults.
+2. `.opencode/session-janitor.json`.
+3. OpenCode plugin tuple options.
+4. Per-run `session_janitor` tool arguments.
+
+To use a different config file, pass `configFile` as a plugin option:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    [
+      "opencode-session-janitor",
+      {
+        "configFile": ".opencode/session-janitor.json"
+      }
+    ]
+  ]
+}
+```
+
+Set `configFile: false` to disable dedicated config file loading.
+
 | Option                  | Default | Description                                          |
 | ----------------------- | ------- | ---------------------------------------------------- |
 | `retentionDays`         | `30`    | Delete candidates must be older than this many days. |
@@ -77,6 +117,10 @@ Deletion is irreversible. Review a dry run before using delete mode.
 
 Unknown options are reported as warnings. In delete mode, warnings block the run
 so a typo cannot silently delete sessions with unintended defaults.
+
+If the default `.opencode/session-janitor.json` file is missing, it is ignored.
+If an explicit `configFile` path is missing or invalid, the run fails before
+listing or deleting sessions.
 
 ## Safety
 
@@ -112,7 +156,8 @@ project or using a small auto-discovered wrapper instead of pointing config at a
 export { server } from "opencode-session-janitor";
 ```
 
-Restart OpenCode after changing plugin configuration or rebuilding the package.
+Restart OpenCode after changing plugin configuration, changing
+`.opencode/session-janitor.json`, or rebuilding the package.
 
 ## Compatibility
 

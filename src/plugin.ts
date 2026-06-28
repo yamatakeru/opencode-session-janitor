@@ -1,6 +1,6 @@
 import { tool, type Plugin } from "@opencode-ai/plugin";
 
-import type { SessionJanitorConfig } from "./config.js";
+import type { SessionJanitorPluginOptions } from "./config.js";
 import { runSessionJanitor } from "./janitor.js";
 
 const toolArgs = {
@@ -40,7 +40,7 @@ const SessionJanitorPlugin: Plugin = async function SessionJanitorPlugin(
   input,
   options,
 ) {
-  const pluginOptions = options as SessionJanitorConfig | undefined;
+  const pluginOptions = options as SessionJanitorPluginOptions | undefined;
 
   return {
     tool: {
@@ -52,6 +52,7 @@ const SessionJanitorPlugin: Plugin = async function SessionJanitorPlugin(
           const result = await runSessionJanitor({
             client: input.client,
             pluginOptions,
+            configFileBaseDir: input.worktree,
             toolArgs: args,
             currentSessionID: context.sessionID,
             trigger: "manual",

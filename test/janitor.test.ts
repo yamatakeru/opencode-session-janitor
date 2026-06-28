@@ -1,4 +1,7 @@
 import type { Session } from "@opencode-ai/sdk";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { runSessionJanitor } from "../src/janitor.js";
@@ -58,6 +61,157 @@ describe("runSessionJanitor", () => {
     expect(result.output).toContain("Refusing delete");
     expect(client.session.list).not.toHaveBeenCalled();
     expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
+  it("loads the default project config file before listing sessions", async () => {
+    const projectDir = await createTempProject({
+      "session-janitor.json": JSON.stringify({ retentionDays: 1 }),
+    });
+    const { client } = createClient([makeSession("old", daysAgo(2))]);
+
+    try {
+      const result = await runSessionJanitor({
+        client,
+        configFileBaseDir: projectDir,
+        currentSessionID: "current",
+        now: NOW,
+      });
+
+      expect(result.output).toContain("Retention days: 1");
+      expect(result.output).toContain("Candidates: 1");
+      expect(result.metadata.configFile).toEqual(
+        expect.objectContaining({ loaded: true }),
+      );
+      expect(client.session.delete).not.toHaveBeenCalled();
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores a missing default project config file", async () => {
+    const projectDir = await createTempProject();
+    const { client } = createClient([makeSession("newer", daysAgo(2))]);
+
+    try {
+      const result = await runSessionJanitor({
+        client,
+        configFileBaseDir: projectDir,
+        currentSessionID: "current",
+        now: NOW,
+      });
+
+      expect(result.output).toContain("Retention days: 30");
+      expect(result.output).toContain("Candidates: 0");
+      expect(result.metadata.configFile).toEqual(
+        expect.objectContaining({ loaded: false }),
+      );
+      expect(client.session.list).toHaveBeenCalled();
+      expect(client.session.delete).not.toHaveBeenCalled();
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails before listing when an explicit config file is missing", async () => {
+    const projectDir = await createTempProject();
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    try {
+      const result = await runSessionJanitor({
+        client,
+        configFileBaseDir: projectDir,
+        pluginOptions: { configFile: ".opencode/missing.json" },
+        currentSessionID: "current",
+        now: NOW,
+      });
+
+      expect(result.output).toContain("Mode: validation-error");
+      expect(result.output).toContain("Failed to read config file");
+      expect(client.session.list).not.toHaveBeenCalled();
+      expect(client.session.delete).not.toHaveBeenCalled();
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails before listing when explicit relative configFile has no base directory", async () => {
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    const result = await runSessionJanitor({
+      client,
+      pluginOptions: { configFile: ".opencode/session-janitor.json" },
+      currentSessionID: "current",
+      now: NOW,
+    });
+
+    expect(result.output).toContain("Mode: validation-error");
+    expect(result.output).toContain("configFile must be absolute");
+    expect(client.session.list).not.toHaveBeenCalled();
+    expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
+  it("fails before listing when explicit absolute configFile is missing", async () => {
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    const result = await runSessionJanitor({
+      client,
+      pluginOptions: {
+        configFile: join(tmpdir(), "missing-session-janitor-config.json"),
+      },
+      currentSessionID: "current",
+      now: NOW,
+    });
+
+    expect(result.output).toContain("Mode: validation-error");
+    expect(result.output).toContain("Failed to read config file");
+    expect(client.session.list).not.toHaveBeenCalled();
+    expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
+  it("fails before listing when a config file contains invalid JSON", async () => {
+    const projectDir = await createTempProject({
+      "session-janitor.json": "{ invalid",
+    });
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    try {
+      const result = await runSessionJanitor({
+        client,
+        configFileBaseDir: projectDir,
+        currentSessionID: "current",
+        now: NOW,
+      });
+
+      expect(result.output).toContain("Mode: validation-error");
+      expect(result.output).toContain("invalid JSON");
+      expect(client.session.list).not.toHaveBeenCalled();
+      expect(client.session.delete).not.toHaveBeenCalled();
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks delete mode when config file options have warnings", async () => {
+    const projectDir = await createTempProject({
+      "session-janitor.json": JSON.stringify({ dryRun: false, typo: true }),
+    });
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    try {
+      const result = await runSessionJanitor({
+        client,
+        configFileBaseDir: projectDir,
+        currentSessionID: "current",
+        now: NOW,
+      });
+
+      expect(result.output).toContain("Mode: validation-error");
+      expect(result.output).toContain("Unknown config file key ignored: typo");
+      expect(client.session.list).not.toHaveBeenCalled();
+      expect(client.session.delete).not.toHaveBeenCalled();
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
   });
 
   it("reports session.list failures without deleting", async () => {
@@ -450,4 +604,18 @@ function createClient(
       },
     },
   };
+}
+
+async function createTempProject(
+  files: Record<string, string> = {},
+): Promise<string> {
+  const projectDir = await mkdtemp(join(tmpdir(), "session-janitor-"));
+  const opencodeDir = join(projectDir, ".opencode");
+  await mkdir(opencodeDir, { recursive: true });
+
+  for (const [name, content] of Object.entries(files)) {
+    await writeFile(join(opencodeDir, name), content, "utf8");
+  }
+
+  return projectDir;
 }
