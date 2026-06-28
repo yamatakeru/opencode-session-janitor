@@ -5,8 +5,7 @@ export type SessionJanitorConfig = {
   dryRun?: boolean;
   includeShared?: boolean;
   excludeCurrentSession?: boolean;
-  minSessionsToKeep?: number;
-  maxDeleteCount?: number;
+  maxDeleteCount?: number | "unlimited";
   trigger?: SessionJanitorTrigger;
   allowAutoDelete?: boolean;
 };
@@ -22,7 +21,6 @@ export const defaultSessionJanitorConfig = {
   dryRun: true,
   includeShared: false,
   excludeCurrentSession: true,
-  minSessionsToKeep: 0,
   maxDeleteCount: 10,
   trigger: "startup",
   allowAutoDelete: false,
@@ -45,7 +43,6 @@ const configKeys = [
   "dryRun",
   "includeShared",
   "excludeCurrentSession",
-  "minSessionsToKeep",
   "maxDeleteCount",
   "trigger",
   "allowAutoDelete",
@@ -81,11 +78,8 @@ export function resolveConfigFromSources(
   if (typeof merged.excludeCurrentSession !== "boolean") {
     errors.push("excludeCurrentSession must be boolean");
   }
-  if (!isNonNegativeInteger(merged.minSessionsToKeep)) {
-    errors.push("minSessionsToKeep must be a non-negative integer");
-  }
-  if (!isPositiveInteger(merged.maxDeleteCount)) {
-    errors.push("maxDeleteCount must be a positive integer");
+  if (!isMaxDeleteCount(merged.maxDeleteCount)) {
+    errors.push('maxDeleteCount must be a positive integer or "unlimited"');
   }
   if (typeof merged.trigger !== "string" || !triggers.has(merged.trigger)) {
     errors.push("trigger must be one of startup or sessionIdle");
@@ -105,7 +99,6 @@ export function resolveConfigFromSources(
       dryRun: merged.dryRun,
       includeShared: merged.includeShared,
       excludeCurrentSession: merged.excludeCurrentSession,
-      minSessionsToKeep: merged.minSessionsToKeep,
       maxDeleteCount: merged.maxDeleteCount,
       trigger: merged.trigger,
       allowAutoDelete: merged.allowAutoDelete,
@@ -159,9 +152,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isPositiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value > 0;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
-function isNonNegativeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+function isMaxDeleteCount(value: unknown): value is number | "unlimited" {
+  return value === "unlimited" || isPositiveInteger(value);
 }

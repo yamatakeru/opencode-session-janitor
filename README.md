@@ -55,11 +55,7 @@ Recommended project config file:
 ```json
 {
   "retentionDays": 30,
-  "dryRun": true,
-  "includeShared": false,
-  "excludeCurrentSession": true,
-  "minSessionsToKeep": 0,
-  "maxDeleteCount": 10
+  "dryRun": true
 }
 ```
 
@@ -93,8 +89,7 @@ Set `configFile: false` to disable dedicated config file loading.
 | `dryRun`                | `true`    | Preview only when enabled.                           |
 | `includeShared`         | `false`   | Include shared sessions as delete candidates.        |
 | `excludeCurrentSession` | `true`    | Protect the currently running session.               |
-| `minSessionsToKeep`     | `0`       | Always keep at least this many newest sessions.      |
-| `maxDeleteCount`        | `10`      | Maximum sessions deleted in one run.                 |
+| `maxDeleteCount`        | `10`      | Maximum sessions deleted in one run, or `unlimited`. |
 | `trigger`               | `startup` | Hook-driven trigger to use in a supported stage.     |
 | `allowAutoDelete`       | `false`   | Reserved safety gate for future automatic deletion.  |
 

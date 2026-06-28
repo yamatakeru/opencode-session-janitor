@@ -12,7 +12,6 @@ export type SkipReason =
   | "unknown_shared_status"
   | "shared_session"
   | "newer_than_retention"
-  | "min_sessions_to_keep"
   | "max_delete_count";
 
 export type CandidateReason = "older_than_retention";
@@ -82,10 +81,6 @@ export function evaluateSessions({
 }: EvaluateSessionsInput): EvaluationResult {
   const skipped: SkippedSession[] = [];
   const eligible: SessionCandidate[] = [];
-  const minKeepProtectedIDs = getMinKeepProtectedIDs(
-    sessions,
-    config.minSessionsToKeep,
-  );
   const cutoff = now - config.retentionDays * DAY_MS;
 
   for (const session of sessions) {
@@ -131,11 +126,6 @@ export function evaluateSessions({
       continue;
     }
 
-    if (minKeepProtectedIDs.has(sessionIdentity.id)) {
-      skipped.push({ ...summary, reason: "min_sessions_to_keep" });
-      continue;
-    }
-
     eligible.push({ ...summary, reason: "older_than_retention" });
   }
 
@@ -144,9 +134,13 @@ export function evaluateSessions({
     return byUpdated === 0 ? left.id.localeCompare(right.id) : byUpdated;
   });
 
-  const candidates = eligible.slice(0, config.maxDeleteCount);
+  const maxDeleteCount =
+    config.maxDeleteCount === "unlimited"
+      ? eligible.length
+      : config.maxDeleteCount;
+  const candidates = eligible.slice(0, maxDeleteCount);
   const maxDeleteSkipped = eligible
-    .slice(config.maxDeleteCount)
+    .slice(maxDeleteCount)
     .map<SkippedSession>((session) => ({
       ...session,
       reason: "max_delete_count",
@@ -165,37 +159,6 @@ export function evaluateSessions({
 
 export function calculateAgeDays(updated: number, now: number): number {
   return Math.max(0, (now - updated) / DAY_MS);
-}
-
-function getMinKeepProtectedIDs(
-  sessions: Session[],
-  minSessionsToKeep: number,
-): Set<string> {
-  if (minSessionsToKeep === 0) {
-    return new Set();
-  }
-
-  const sessionsByNewest = sessions.flatMap((session) => {
-    const identity = getSessionIdentity(session);
-    if (!identity.ok) {
-      return [];
-    }
-
-    const timestamp = getUpdatedTimestamp(session);
-    if (!timestamp.ok) {
-      return [];
-    }
-    return [{ id: identity.identity.id, updated: timestamp.updated }];
-  });
-
-  sessionsByNewest.sort((left, right) => {
-    const byUpdated = right.updated - left.updated;
-    return byUpdated === 0 ? left.id.localeCompare(right.id) : byUpdated;
-  });
-
-  return new Set(
-    sessionsByNewest.slice(0, minSessionsToKeep).map((session) => session.id),
-  );
 }
 
 function getUpdatedTimestamp(session: Session): TimestampResult {
@@ -308,7 +271,6 @@ function countSkippedReasons(
     unknown_shared_status: 0,
     shared_session: 0,
     newer_than_retention: 0,
-    min_sessions_to_keep: 0,
     max_delete_count: 0,
   } satisfies Record<SkipReason, number>;
 

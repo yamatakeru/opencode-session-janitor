@@ -101,32 +101,6 @@ describe("evaluateSessions", () => {
     );
   });
 
-  it("protects the newest minSessionsToKeep sessions", () => {
-    const result = evaluateSessions({
-      sessions: [
-        makeSession("oldest", daysAgo(70)),
-        makeSession("middle", daysAgo(60)),
-        makeSession("newest-old", daysAgo(50)),
-      ],
-      config: { ...defaultSessionJanitorConfig, minSessionsToKeep: 1 },
-      currentSessionID: "current",
-      now: NOW,
-    });
-
-    expect(result.candidates.map((session) => session.id)).toEqual([
-      "oldest",
-      "middle",
-    ]);
-    expect(result.skipped).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: "newest-old",
-          reason: "min_sessions_to_keep",
-        }),
-      ]),
-    );
-  });
-
   it("applies maxDeleteCount to eligible old sessions", () => {
     const result = evaluateSessions({
       sessions: [
@@ -152,5 +126,28 @@ describe("evaluateSessions", () => {
         }),
       ]),
     );
+  });
+
+  it("does not cap eligible old sessions when maxDeleteCount is unlimited", () => {
+    const result = evaluateSessions({
+      sessions: [
+        makeSession("oldest", daysAgo(70)),
+        makeSession("middle", daysAgo(60)),
+        makeSession("newest-old", daysAgo(50)),
+      ],
+      config: { ...defaultSessionJanitorConfig, maxDeleteCount: "unlimited" },
+      currentSessionID: "current",
+      now: NOW,
+    });
+
+    expect(result.candidates.map((session) => session.id)).toEqual([
+      "oldest",
+      "middle",
+      "newest-old",
+    ]);
+    expect(result.maxDeleteCountApplied).toBe(false);
+    expect(
+      result.skipped.some((session) => session.reason === "max_delete_count"),
+    ).toBe(false);
   });
 });

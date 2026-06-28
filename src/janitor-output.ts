@@ -1,4 +1,7 @@
-import type { SessionJanitorConfig, SessionJanitorTrigger } from "./config.js";
+import type {
+  ResolvedSessionJanitorConfig,
+  SessionJanitorTrigger,
+} from "./config.js";
 import type { EvaluationResult, SessionCandidate } from "./evaluate.js";
 
 type RenderedDeleteSuccess = {
@@ -88,7 +91,7 @@ export function renderCancelled(
 export function renderResult(input: {
   trigger: SessionJanitorTrigger;
   mode: string;
-  config: SessionJanitorConfig;
+  config: ResolvedSessionJanitorConfig;
   warnings: string[];
   evaluation: EvaluationResult;
   deleted: RenderedDeleteSuccess[];
@@ -102,7 +105,6 @@ export function renderResult(input: {
     `Retention days: ${input.config.retentionDays}`,
     `Include shared: ${input.config.includeShared}`,
     `Exclude current session: ${input.config.excludeCurrentSession}`,
-    `Min sessions to keep: ${input.config.minSessionsToKeep}`,
     `Max delete count: ${input.config.maxDeleteCount}`,
     `Total sessions: ${input.evaluation.totalSessions}`,
     `Candidates: ${input.evaluation.candidates.length}`,

@@ -81,8 +81,7 @@ describe("resolveConfig", () => {
       dryRun: "false",
       includeShared: "no",
       excludeCurrentSession: 1,
-      minSessionsToKeep: -1,
-      maxDeleteCount: 0,
+      maxDeleteCount: Number.MAX_SAFE_INTEGER + 1,
       trigger: "never",
       allowAutoDelete: "yes",
     });
@@ -96,11 +95,20 @@ describe("resolveConfig", () => {
       "dryRun must be boolean",
       "includeShared must be boolean",
       "excludeCurrentSession must be boolean",
-      "minSessionsToKeep must be a non-negative integer",
-      "maxDeleteCount must be a positive integer",
+      'maxDeleteCount must be a positive integer or "unlimited"',
       "trigger must be one of startup or sessionIdle",
       "allowAutoDelete must be boolean",
     ]);
+  });
+
+  it("allows unlimited maxDeleteCount", () => {
+    const result = resolveConfig({ maxDeleteCount: "unlimited" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("expected config to be valid");
+    }
+    expect(result.config.maxDeleteCount).toBe("unlimited");
   });
 
   it("rejects explicit null option objects", () => {
