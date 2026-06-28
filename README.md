@@ -33,6 +33,9 @@ Add the plugin to your OpenCode config:
 OpenCode uses the singular top-level `plugin` key. Plugin options are passed as
 the second item in the plugin tuple.
 
+The package root is the OpenCode plugin entrypoint. Programmatic APIs are
+available from the `opencode-session-janitor/api` subpath.
+
 ## Usage
 
 Ask OpenCode to run the `session_janitor` tool. With the default configuration,
@@ -99,6 +102,17 @@ npm run build
 ```
 
 `npm run format` checks formatting with Prettier.
+
+For local plugin development, prefer installing the package into the OpenCode
+project or using a small auto-discovered wrapper instead of pointing config at a
+`dist/` file directly:
+
+```js
+// .opencode/plugins/session-janitor.js
+export { server } from "opencode-session-janitor";
+```
+
+Restart OpenCode after changing plugin configuration or rebuilding the package.
 
 ## Compatibility
 

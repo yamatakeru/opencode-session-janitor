@@ -1,8 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { SessionJanitorPlugin } from "../src/index.js";
+import { server as SessionJanitorPlugin } from "../src/index.js";
 
 describe("SessionJanitorPlugin", () => {
+  it("keeps the package root plugin-only", async () => {
+    const module = await import("../src/index.js");
+
+    expect(Object.keys(module)).toEqual(["server"]);
+    expect(module.server).toBe(SessionJanitorPlugin);
+  });
+
+  it("exposes reusable runtime APIs from the api entrypoint", async () => {
+    const module = await import("../src/api.js");
+
+    expect(module).not.toHaveProperty("default");
+    expect(module).not.toHaveProperty("server");
+    expect(module).toEqual(
+      expect.objectContaining({
+        calculateAgeDays: expect.any(Function),
+        defaultSessionJanitorConfig: expect.any(Object),
+        evaluateSessions: expect.any(Function),
+        resolveConfig: expect.any(Function),
+        runSessionJanitor: expect.any(Function),
+      }),
+    );
+  });
+
   it("registers the session_janitor custom tool", async () => {
     const client = {
       session: {
