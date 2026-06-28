@@ -52,9 +52,13 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, retentionDay: 365 },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        retentionDay: 365,
+      },
       currentSessionID: "current",
-      trigger: "sessionIdle",
+      trigger: "startup",
       now: NOW,
     });
 
@@ -197,7 +201,11 @@ describe("runSessionJanitor", () => {
 
   it("blocks delete mode when config file options have warnings", async () => {
     const projectDir = await createTempProject({
-      "session-janitor.json": JSON.stringify({ dryRun: false, typo: true }),
+      "session-janitor.json": JSON.stringify({
+        dryRun: false,
+        allowAutoDelete: true,
+        typo: true,
+      }),
     });
     const { client } = createClient([makeSession("old", daysAgo(40))]);
 
@@ -206,7 +214,7 @@ describe("runSessionJanitor", () => {
         client,
         configFileBaseDir: projectDir,
         currentSessionID: "current",
-        trigger: "sessionIdle",
+        trigger: "startup",
         now: NOW,
       });
 
@@ -235,9 +243,9 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false },
+      pluginOptions: { dryRun: false, allowAutoDelete: true },
       currentSessionID: "current",
-      trigger: "sessionIdle",
+      trigger: "startup",
       now: NOW,
     });
 
@@ -314,9 +322,9 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false },
+      pluginOptions: { dryRun: false, allowAutoDelete: true },
       currentSessionID: "current",
-      trigger: "sessionIdle",
+      trigger: "startup",
       abortSignal: controller.signal,
       now: NOW,
     });
@@ -342,7 +350,7 @@ describe("runSessionJanitor", () => {
     expect(client.session.delete).not.toHaveBeenCalled();
   });
 
-  it("forces startup runs to dry-run even when config requests deletion", async () => {
+  it("keeps startup runs dry-run unless auto delete is explicitly allowed", async () => {
     const projectDir = await createTempProject({
       "session-janitor.json": JSON.stringify({ dryRun: false }),
     });
@@ -359,7 +367,7 @@ describe("runSessionJanitor", () => {
 
       expect(result.output).toContain("Mode: dry-run");
       expect(result.output).toContain(
-        "dryRun:false ignored because startup runs are dry-run only.",
+        "dryRun:false ignored because startup auto delete requires allowAutoDelete:true.",
       );
       expect(result.metadata.config).toEqual(
         expect.objectContaining({ dryRun: true }),
@@ -368,6 +376,118 @@ describe("runSessionJanitor", () => {
     } finally {
       await rm(projectDir, { recursive: true, force: true });
     }
+  });
+
+  it("allows startup delete only when auto delete gates are satisfied", async () => {
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    const result = await runSessionJanitor({
+      client,
+      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      currentSessionID: "current",
+      trigger: "startup",
+      now: NOW,
+    });
+
+    expect(result.output).toContain("Mode: delete");
+    expect(result.output).toContain("Deleted: 1");
+    expect(client.session.delete).toHaveBeenCalledWith({ path: { id: "old" } });
+  });
+
+  it("applies maxDeleteCount during startup auto delete", async () => {
+    const { client } = createClient([
+      makeSession("oldest", daysAgo(70)),
+      makeSession("middle", daysAgo(60)),
+      makeSession("newest-old", daysAgo(50)),
+    ]);
+
+    const result = await runSessionJanitor({
+      client,
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        maxDeleteCount: 2,
+      },
+      currentSessionID: "current",
+      trigger: "startup",
+      now: NOW,
+    });
+
+    expect(client.session.delete).toHaveBeenCalledTimes(2);
+    expect(client.session.delete).toHaveBeenNthCalledWith(1, {
+      path: { id: "oldest" },
+    });
+    expect(client.session.delete).toHaveBeenNthCalledWith(2, {
+      path: { id: "middle" },
+    });
+    expect(result.output).toContain("Max delete count applied: yes");
+  });
+
+  it("protects shared and current sessions during startup auto delete", async () => {
+    const { client } = createClient([
+      makeSession("current", daysAgo(90)),
+      makeSession("shared", daysAgo(80), {
+        share: { url: "https://example.com" },
+      }),
+      makeSession("old", daysAgo(70)),
+    ]);
+
+    const result = await runSessionJanitor({
+      client,
+      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      currentSessionID: "current",
+      trigger: "startup",
+      now: NOW,
+    });
+
+    expect(client.session.delete).toHaveBeenCalledTimes(1);
+    expect(client.session.delete).toHaveBeenCalledWith({ path: { id: "old" } });
+    expect(result.output).toContain("current_session: 1");
+    expect(result.output).toContain("shared_session: 1");
+  });
+
+  it("does not auto delete when includeShared is enabled", async () => {
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    const result = await runSessionJanitor({
+      client,
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        includeShared: true,
+      },
+      currentSessionID: "current",
+      trigger: "startup",
+      now: NOW,
+    });
+
+    expect(result.output).toContain("Mode: dry-run");
+    expect(result.output).toContain(
+      "startup auto delete does not support includeShared:true",
+    );
+    expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
+  it("does not auto delete when current-session protection is disabled", async () => {
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    const result = await runSessionJanitor({
+      client,
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        excludeCurrentSession: false,
+      },
+      currentSessionID: "current",
+      trigger: "startup",
+      now: NOW,
+    });
+
+    expect(result.output).toContain("Mode: dry-run");
+    expect(result.output).toContain(
+      "startup auto delete requires excludeCurrentSession:true",
+    );
+    expect(client.session.delete).not.toHaveBeenCalled();
   });
 
   it("warns when dry-run cannot verify current-session protection", async () => {
@@ -390,8 +510,8 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false },
-      trigger: "sessionIdle",
+      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      trigger: "startup",
       now: NOW,
     });
 
@@ -406,9 +526,9 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false },
+      pluginOptions: { dryRun: false, allowAutoDelete: true },
       currentSessionID: "current",
-      trigger: "sessionIdle",
+      trigger: "startup",
       now: NOW,
     });
 
@@ -433,9 +553,9 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false },
+      pluginOptions: { dryRun: false, allowAutoDelete: true },
       currentSessionID: "current",
-      trigger: "sessionIdle",
+      trigger: "startup",
       now: NOW,
     });
 
@@ -468,9 +588,9 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false },
+      pluginOptions: { dryRun: false, allowAutoDelete: true },
       currentSessionID: "current",
-      trigger: "sessionIdle",
+      trigger: "startup",
       abortSignal: controller.signal,
       now: NOW,
     });
@@ -503,9 +623,9 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false },
+      pluginOptions: { dryRun: false, allowAutoDelete: true },
       currentSessionID: "current",
-      trigger: "sessionIdle",
+      trigger: "startup",
       abortSignal: controller.signal,
       now: NOW,
     });
@@ -540,9 +660,9 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false },
+      pluginOptions: { dryRun: false, allowAutoDelete: true },
       currentSessionID: "current",
-      trigger: "sessionIdle",
+      trigger: "startup",
       now: NOW,
     });
 
@@ -562,9 +682,9 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false },
+      pluginOptions: { dryRun: false, allowAutoDelete: true },
       currentSessionID: "current",
-      trigger: "sessionIdle",
+      trigger: "startup",
       now: NOW,
     });
 

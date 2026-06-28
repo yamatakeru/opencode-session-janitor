@@ -5,7 +5,8 @@
 - Added startup dry-run evaluation when the plugin loads.
 - Removed the agent-callable `session_janitor` custom tool.
 - Removed per-run tool arguments as a cleanup policy source.
-- Changed startup runs to force dry-run mode even when config requests deletion.
+- Added explicit opt-in startup auto delete behind `dryRun: false` and `allowAutoDelete: true`.
+- Changed plugin startup to run an initial forced dry-run, then wait for a session ID before any auto delete.
 - Removed `minSessionsToKeep` from cleanup configuration.
 - Added `maxDeleteCount: "unlimited"` as an explicit no-cap delete-count option.
 

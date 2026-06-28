@@ -50,6 +50,7 @@ describe("SessionJanitorPlugin", () => {
       });
 
       expect(hooks).not.toHaveProperty("tool");
+      expect(hooks.event).toEqual(expect.any(Function));
       await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
 
       expect(client.session.list).toHaveBeenCalledOnce();
@@ -64,7 +65,7 @@ describe("SessionJanitorPlugin", () => {
               mode: "dry-run",
               candidateCount: 1,
               warnings: expect.arrayContaining([
-                "dryRun:false ignored because startup runs are dry-run only.",
+                "dryRun:false ignored because this run was forced to dry-run.",
               ]),
             }),
           }),
@@ -95,10 +96,240 @@ describe("SessionJanitorPlugin", () => {
     });
 
     expect(hooks).not.toHaveProperty("tool");
+    expect(hooks.event).toEqual(expect.any(Function));
     expect(client.session.delete).not.toHaveBeenCalled();
 
     resolveList!({ data: [] });
     await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
+  });
+
+  it("runs startup auto delete once after observing a session ID", async () => {
+    const client = {
+      session: {
+        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi.fn(async () => ({ data: true })),
+      },
+    };
+
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    try {
+      const hooks = await SessionJanitorPlugin(createPluginInput(client), {
+        configFile: false,
+        dryRun: false,
+        allowAutoDelete: true,
+      });
+
+      await hooks.event?.({
+        event: {
+          type: "session.idle",
+          properties: { sessionID: "current" },
+        } as never,
+      });
+      await hooks.event?.({
+        event: {
+          type: "command.executed",
+          properties: { sessionID: "current", name: "test" },
+        } as never,
+      });
+
+      await vi.waitFor(() => expect(client.session.delete).toHaveBeenCalled());
+
+      expect(client.session.delete).toHaveBeenCalledTimes(1);
+      expect(client.session.delete).toHaveBeenCalledWith({
+        path: { id: "old" },
+      });
+      await vi.waitFor(() =>
+        expect(client.app.log).toHaveBeenCalledWith(
+          expect.objectContaining({
+            body: expect.objectContaining({
+              message: "Session janitor delete completed",
+              extra: expect.objectContaining({
+                trigger: "startup",
+                mode: "delete",
+                deletedCount: 1,
+              }),
+            }),
+          }),
+        ),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits for the startup dry-run before auto delete", async () => {
+    let resolveDryRunList: (value: {
+      data: ReturnType<typeof makeSession>[];
+    }) => void;
+    const dryRunList = new Promise<{ data: ReturnType<typeof makeSession>[] }>(
+      (resolve) => {
+        resolveDryRunList = resolve;
+      },
+    );
+    const client = {
+      session: {
+        list: vi
+          .fn()
+          .mockImplementationOnce(() => dryRunList)
+          .mockImplementationOnce(async () => ({
+            data: [makeSession("old", daysAgo(40))],
+          })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi.fn(async () => ({ data: true })),
+      },
+    };
+
+    const hooks = await SessionJanitorPlugin(createPluginInput(client), {
+      configFile: false,
+      dryRun: false,
+      allowAutoDelete: true,
+    });
+
+    const eventRun = hooks.event?.({
+      event: {
+        type: "session.idle",
+        properties: { sessionID: "current" },
+      } as never,
+    });
+
+    await vi.waitFor(() => expect(client.session.list).toHaveBeenCalledOnce());
+    expect(client.session.delete).not.toHaveBeenCalled();
+
+    resolveDryRunList!({ data: [makeSession("old", daysAgo(40))] });
+    await eventRun;
+    await vi.waitFor(() =>
+      expect(client.session.delete).toHaveBeenCalledOnce(),
+    );
+  });
+
+  it("does not auto delete if the startup dry-run failed", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const client = {
+      session: {
+        list: vi.fn(async () => ({ error: { message: "boom" } })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi.fn(async () => ({ data: true })),
+      },
+    };
+
+    try {
+      const hooks = await SessionJanitorPlugin(createPluginInput(client), {
+        configFile: false,
+        dryRun: false,
+        allowAutoDelete: true,
+      });
+
+      await hooks.event?.({
+        event: {
+          type: "session.idle",
+          properties: { sessionID: "current" },
+        } as never,
+      });
+
+      await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
+      expect(client.session.list).toHaveBeenCalledOnce();
+      expect(client.session.delete).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not auto delete if config changes after the startup dry-run", async () => {
+    const client = {
+      session: {
+        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi.fn(async () => ({ data: true })),
+      },
+    };
+    const pluginOptions = {
+      configFile: false,
+      dryRun: false,
+      allowAutoDelete: true,
+      retentionDays: 30,
+    };
+
+    const hooks = await SessionJanitorPlugin(
+      createPluginInput(client),
+      pluginOptions,
+    );
+    await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
+
+    pluginOptions.retentionDays = 10;
+    await hooks.event?.({
+      event: {
+        type: "session.idle",
+        properties: { sessionID: "current" },
+      } as never,
+    });
+
+    expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
+  it("does not treat session info events as current-session observations", async () => {
+    const client = {
+      session: {
+        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi.fn(async () => ({ data: true })),
+      },
+    };
+
+    const hooks = await SessionJanitorPlugin(createPluginInput(client), {
+      configFile: false,
+      dryRun: false,
+      allowAutoDelete: true,
+    });
+
+    await hooks.event?.({
+      event: {
+        type: "session.updated",
+        properties: { info: makeSession("other", daysAgo(1)) },
+      } as never,
+    });
+
+    await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
+    expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
+  it("does not run auto delete after observing a session ID without opt-in", async () => {
+    const client = {
+      session: {
+        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi.fn(async () => ({ data: true })),
+      },
+    };
+
+    const hooks = await SessionJanitorPlugin(createPluginInput(client), {
+      configFile: false,
+      dryRun: false,
+    });
+
+    await hooks.event?.({
+      event: {
+        type: "session.idle",
+        properties: { sessionID: "current" },
+      } as never,
+    });
+
+    await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
+    expect(client.session.delete).not.toHaveBeenCalled();
   });
 
   it("does not fail plugin startup when startup dry-run cannot be logged", async () => {
@@ -113,7 +344,7 @@ describe("SessionJanitorPlugin", () => {
     try {
       await expect(
         SessionJanitorPlugin(createPluginInput(client), { configFile: false }),
-      ).resolves.toEqual({});
+      ).resolves.toEqual({ event: expect.any(Function) });
       await vi.waitFor(() => expect(warn).toHaveBeenCalled());
 
       expect(client.session.list).toHaveBeenCalledOnce();
@@ -143,7 +374,7 @@ describe("SessionJanitorPlugin", () => {
     try {
       await expect(
         SessionJanitorPlugin(createPluginInput(client), { configFile: false }),
-      ).resolves.toEqual({});
+      ).resolves.toEqual({ event: expect.any(Function) });
       await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
 
       expect(client.app.log).toHaveBeenCalledWith(
@@ -154,8 +385,10 @@ describe("SessionJanitorPlugin", () => {
           }),
         }),
       );
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("Session janitor startup dry-run failed"),
+      await vi.waitFor(() =>
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("Session janitor startup dry-run failed"),
+        ),
       );
       expect(client.session.delete).not.toHaveBeenCalled();
     } finally {

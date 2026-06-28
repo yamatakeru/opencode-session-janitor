@@ -1,10 +1,12 @@
 # opencode-session-janitor
 
-OpenCode plugin for cleaning up old local sessions with a safe startup dry-run.
+OpenCode plugin for cleaning up old local sessions with a safe startup dry-run
+and explicit opt-in auto delete.
 It does not expose an agent-callable custom tool.
 
-The plugin is safe by default: startup runs always perform a dry run and never
-delete sessions.
+The plugin is safe by default: startup runs perform a dry run and never delete
+sessions unless both `dryRun: false` and `allowAutoDelete: true` are explicitly
+configured.
 
 ## Install
 
@@ -44,9 +46,10 @@ When OpenCode loads the plugin, it runs one startup dry-run evaluation. The
 summary is written through OpenCode's app log with candidate counts, skipped
 counts, warnings, and config metadata.
 
-`dryRun: false` is ignored for startup plugin runs in this version. Startup and
-agent-callable deletion are not available; the programmatic API still retains
-explicit delete-mode primitives for controlled callers.
+If auto delete is explicitly enabled, the plugin waits until it observes a
+session ID from an OpenCode session event, then performs at most one startup
+auto-delete run. This preserves current-session protection. Agent-callable
+deletion is not available.
 
 ## Configuration
 
@@ -91,7 +94,7 @@ Set `configFile: false` to disable dedicated config file loading.
 | `excludeCurrentSession` | `true`    | Protect the currently running session.               |
 | `maxDeleteCount`        | `10`      | Maximum sessions deleted in one run, or `unlimited`. |
 | `trigger`               | `startup` | Hook-driven trigger to use in a supported stage.     |
-| `allowAutoDelete`       | `false`   | Reserved safety gate for future automatic deletion.  |
+| `allowAutoDelete`       | `false`   | Required safety gate for startup auto delete.        |
 
 Unknown options are reported as warnings. In delete mode, warnings block the run
 so a typo cannot silently delete sessions with unintended defaults.
@@ -102,18 +105,41 @@ listing or deleting sessions.
 
 ## Safety
 
-- Startup runs are always dry-run only.
+- Startup auto delete requires `dryRun: false` and `allowAutoDelete: true`.
+- First run with `dryRun: true` is strongly recommended before enabling delete.
 - Shared sessions and the current session are protected by default.
+- Startup auto delete currently refuses `includeShared: true`.
 - Sessions with missing, invalid, or ambiguous metadata are skipped.
 - Delete mode refuses to run if the current session cannot be identified while
   current-session protection is enabled.
 - No agent-callable `session_janitor` tool is registered.
 - The plugin uses OpenCode session APIs and does not edit storage files directly.
+- Deletion is irreversible.
+
+## Auto Delete
+
+To enable automatic deletion, configure all required gates:
+
+```json
+{
+  "retentionDays": 30,
+  "dryRun": false,
+  "allowAutoDelete": true,
+  "excludeCurrentSession": true,
+  "includeShared": false,
+  "maxDeleteCount": 10,
+  "trigger": "startup"
+}
+```
+
+Auto delete runs once per plugin instance after the plugin observes the current
+session ID. `sessionIdle` auto delete is intentionally not enabled in this
+version because its trigger timing is harder to reason about safely.
 
 ## Current Scope
 
-This version implements startup dry-run only. It does not perform automatic
-deletion and does not provide a manual custom tool.
+This version implements startup dry-run and explicit opt-in startup auto delete.
+It does not provide a manual custom tool or scheduled background cleanup.
 
 ## Development
 

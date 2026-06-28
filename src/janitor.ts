@@ -34,8 +34,14 @@ import type {
 export type { SessionJanitorClient } from "./janitor-session-client.js";
 
 const serviceName = "opencode-session-janitor";
-const startupDryRunWarning =
-  "dryRun:false ignored because startup runs are dry-run only.";
+const autoDeleteRequiresAllowWarning =
+  "dryRun:false ignored because startup auto delete requires allowAutoDelete:true.";
+const autoDeleteRequiresCurrentSessionProtectionWarning =
+  "dryRun:false ignored because startup auto delete requires excludeCurrentSession:true.";
+const autoDeleteSharedUnsupportedWarning =
+  "dryRun:false ignored because startup auto delete does not support includeShared:true.";
+const nonStartupDryRunWarning =
+  "dryRun:false ignored because automatic deletion is only supported for trigger:startup.";
 
 type LogResult =
   | { ok: true }
@@ -52,6 +58,7 @@ export type RunSessionJanitorInput = {
   trigger?: SessionJanitorTrigger;
   now?: number;
   abortSignal?: AbortSignal;
+  forceDryRun?: boolean;
 };
 
 export type DeleteSuccess = {
@@ -79,6 +86,7 @@ export async function runSessionJanitor({
   trigger = "startup",
   now = Date.now(),
   abortSignal,
+  forceDryRun = false,
 }: RunSessionJanitorInput): Promise<RunSessionJanitorResult> {
   const configFile = await loadSessionJanitorConfigFile({
     baseDir: configFileBaseDir,
@@ -116,7 +124,9 @@ export async function runSessionJanitor({
   }
 
   const warnings = [...validation.warnings];
-  const config = applyStartupDryRun(validation.config, warnings, trigger);
+  const config = forceDryRun
+    ? applyForcedDryRun(validation.config, warnings)
+    : applyAutoDeleteGate(validation.config, warnings, trigger);
   const mode = config.dryRun ? "dry-run" : "delete";
   const verifiedCurrentSessionID = isNonEmptyString(currentSessionID)
     ? currentSessionID
@@ -358,17 +368,56 @@ export async function runSessionJanitor({
   );
 }
 
-function applyStartupDryRun(
+function applyAutoDeleteGate(
   config: ResolvedSessionJanitorConfig,
   warnings: string[],
   trigger: SessionJanitorTrigger,
 ): ResolvedSessionJanitorConfig {
-  if (trigger !== "startup" || config.dryRun) {
+  if (config.dryRun) {
     return config;
   }
 
-  warnings.push(startupDryRunWarning);
+  const gateWarnings = getAutoDeleteGateWarnings(config, trigger);
+  if (gateWarnings.length === 0) {
+    return config;
+  }
+
+  warnings.push(...gateWarnings);
   return { ...config, dryRun: true };
+}
+
+function applyForcedDryRun(
+  config: ResolvedSessionJanitorConfig,
+  warnings: string[],
+): ResolvedSessionJanitorConfig {
+  if (config.dryRun) {
+    return config;
+  }
+
+  warnings.push("dryRun:false ignored because this run was forced to dry-run.");
+  return { ...config, dryRun: true };
+}
+
+function getAutoDeleteGateWarnings(
+  config: ResolvedSessionJanitorConfig,
+  trigger: SessionJanitorTrigger,
+): string[] {
+  const warnings: string[] = [];
+
+  if (trigger !== "startup") {
+    warnings.push(nonStartupDryRunWarning);
+  }
+  if (!config.allowAutoDelete) {
+    warnings.push(autoDeleteRequiresAllowWarning);
+  }
+  if (!config.excludeCurrentSession) {
+    warnings.push(autoDeleteRequiresCurrentSessionProtectionWarning);
+  }
+  if (config.includeShared) {
+    warnings.push(autoDeleteSharedUnsupportedWarning);
+  }
+
+  return warnings;
 }
 
 function buildMetadata(input: {
