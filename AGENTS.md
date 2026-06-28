@@ -10,11 +10,13 @@ documentation.
 
 ## Current Scope
 
-Stage 1.1 is implemented: the manual `session_janitor` custom tool has been
-removed from the agent-callable surface.
+Stage 2 is implemented: OpenCode plugin startup runs perform a dry-run session
+cleanup evaluation. The manual `session_janitor` custom tool has been removed
+from the agent-callable surface.
 
 Implemented:
 
+- startup dry-run
 - no agent-callable custom tool
 - dry-run evaluation
 - explicit delete mode
@@ -24,7 +26,6 @@ Implemented:
 
 Not implemented:
 
-- startup dry-run hook
 - automatic deletion
 - scheduled or background cleanup
 
@@ -76,8 +77,7 @@ npm run format
 
 ## Future Stage Guardrails
 
-Stage 2 should introduce startup dry-run only. It must not delete sessions by
-default.
+Stage 2 introduces startup dry-run only. It must not delete sessions.
 
 Stage 3 may add explicit opt-in auto-delete, but only behind strong gates such
 as `dryRun: false` and `allowAutoDelete: true`.

@@ -1,10 +1,10 @@
 # opencode-session-janitor
 
-OpenCode plugin for cleaning up old local sessions with a safe retention policy.
+OpenCode plugin for cleaning up old local sessions with a safe startup dry-run.
 It does not expose an agent-callable custom tool.
 
-The plugin is safe by default: it only performs a dry run unless you explicitly
-set `dryRun: false`.
+The plugin is safe by default: startup runs always perform a dry run and never
+delete sessions.
 
 ## Install
 
@@ -40,16 +40,13 @@ available from the `opencode-session-janitor/api` subpath.
 
 ## Usage
 
-Cleanup policy is defined only by `.opencode/session-janitor.json` and plugin
-tuple options. The plugin intentionally does not register a `session_janitor`
-custom tool, so a model cannot trigger deletion or override policy with
-generated tool arguments.
+When OpenCode loads the plugin, it runs one startup dry-run evaluation. The
+summary is written through OpenCode's app log with candidate counts, skipped
+counts, warnings, and config metadata.
 
-Startup dry-run is the next planned execution path. This version removes the
-manual tool surface but does not yet run automatically on startup.
-
-Deletion is irreversible. Keep `dryRun: true` until you have reviewed a dry-run
-summary from a supported hook-driven run.
+`dryRun: false` is ignored for startup plugin runs in this version. Startup and
+agent-callable deletion are not available; the programmatic API still retains
+explicit delete-mode primitives for controlled callers.
 
 ## Configuration
 
@@ -110,17 +107,18 @@ listing or deleting sessions.
 
 ## Safety
 
-- Dry run is the default.
+- Startup runs are always dry-run only.
 - Shared sessions and the current session are protected by default.
 - Sessions with missing, invalid, or ambiguous metadata are skipped.
 - Delete mode refuses to run if the current session cannot be identified while
   current-session protection is enabled.
+- No agent-callable `session_janitor` tool is registered.
 - The plugin uses OpenCode session APIs and does not edit storage files directly.
 
 ## Current Scope
 
-This version removes the manual `session_janitor` tool. It does not run
-automatically on startup and does not perform automatic deletion.
+This version implements startup dry-run only. It does not perform automatic
+deletion and does not provide a manual custom tool.
 
 ## Development
 

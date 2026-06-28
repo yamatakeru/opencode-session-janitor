@@ -2,9 +2,10 @@
 
 ## Unreleased
 
+- Added startup dry-run evaluation when the plugin loads.
 - Removed the agent-callable `session_janitor` custom tool.
 - Removed per-run tool arguments as a cleanup policy source.
-- Changed the default trigger from `manual` to `startup` for the planned hook-driven path.
+- Changed startup runs to force dry-run mode even when config requests deletion.
 
 ## 0.1.0
 

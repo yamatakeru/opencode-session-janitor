@@ -54,6 +54,7 @@ describe("runSessionJanitor", () => {
       client,
       pluginOptions: { dryRun: false, retentionDay: 365 },
       currentSessionID: "current",
+      trigger: "sessionIdle",
       now: NOW,
     });
 
@@ -74,6 +75,7 @@ describe("runSessionJanitor", () => {
         client,
         configFileBaseDir: projectDir,
         currentSessionID: "current",
+        trigger: "sessionIdle",
         now: NOW,
       });
 
@@ -97,6 +99,7 @@ describe("runSessionJanitor", () => {
         client,
         configFileBaseDir: projectDir,
         currentSessionID: "current",
+        trigger: "sessionIdle",
         now: NOW,
       });
 
@@ -179,6 +182,7 @@ describe("runSessionJanitor", () => {
         client,
         configFileBaseDir: projectDir,
         currentSessionID: "current",
+        trigger: "sessionIdle",
         now: NOW,
       });
 
@@ -202,6 +206,7 @@ describe("runSessionJanitor", () => {
         client,
         configFileBaseDir: projectDir,
         currentSessionID: "current",
+        trigger: "sessionIdle",
         now: NOW,
       });
 
@@ -232,6 +237,7 @@ describe("runSessionJanitor", () => {
       client,
       pluginOptions: { dryRun: false },
       currentSessionID: "current",
+      trigger: "sessionIdle",
       now: NOW,
     });
 
@@ -310,6 +316,7 @@ describe("runSessionJanitor", () => {
       client,
       pluginOptions: { dryRun: false },
       currentSessionID: "current",
+      trigger: "sessionIdle",
       abortSignal: controller.signal,
       now: NOW,
     });
@@ -335,6 +342,34 @@ describe("runSessionJanitor", () => {
     expect(client.session.delete).not.toHaveBeenCalled();
   });
 
+  it("forces startup runs to dry-run even when config requests deletion", async () => {
+    const projectDir = await createTempProject({
+      "session-janitor.json": JSON.stringify({ dryRun: false }),
+    });
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    try {
+      const result = await runSessionJanitor({
+        client,
+        configFileBaseDir: projectDir,
+        currentSessionID: "current",
+        trigger: "startup",
+        now: NOW,
+      });
+
+      expect(result.output).toContain("Mode: dry-run");
+      expect(result.output).toContain(
+        "dryRun:false ignored because startup runs are dry-run only.",
+      );
+      expect(result.metadata.config).toEqual(
+        expect.objectContaining({ dryRun: true }),
+      );
+      expect(client.session.delete).not.toHaveBeenCalled();
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it("warns when dry-run cannot verify current-session protection", async () => {
     const { client } = createClient([makeSession("old", daysAgo(40))]);
 
@@ -356,6 +391,7 @@ describe("runSessionJanitor", () => {
     const result = await runSessionJanitor({
       client,
       pluginOptions: { dryRun: false },
+      trigger: "sessionIdle",
       now: NOW,
     });
 
@@ -372,6 +408,7 @@ describe("runSessionJanitor", () => {
       client,
       pluginOptions: { dryRun: false },
       currentSessionID: "current",
+      trigger: "sessionIdle",
       now: NOW,
     });
 
@@ -398,6 +435,7 @@ describe("runSessionJanitor", () => {
       client,
       pluginOptions: { dryRun: false },
       currentSessionID: "current",
+      trigger: "sessionIdle",
       now: NOW,
     });
 
@@ -432,6 +470,7 @@ describe("runSessionJanitor", () => {
       client,
       pluginOptions: { dryRun: false },
       currentSessionID: "current",
+      trigger: "sessionIdle",
       abortSignal: controller.signal,
       now: NOW,
     });
@@ -466,6 +505,7 @@ describe("runSessionJanitor", () => {
       client,
       pluginOptions: { dryRun: false },
       currentSessionID: "current",
+      trigger: "sessionIdle",
       abortSignal: controller.signal,
       now: NOW,
     });
@@ -502,6 +542,7 @@ describe("runSessionJanitor", () => {
       client,
       pluginOptions: { dryRun: false },
       currentSessionID: "current",
+      trigger: "sessionIdle",
       now: NOW,
     });
 
@@ -523,6 +564,7 @@ describe("runSessionJanitor", () => {
       client,
       pluginOptions: { dryRun: false },
       currentSessionID: "current",
+      trigger: "sessionIdle",
       now: NOW,
     });
 

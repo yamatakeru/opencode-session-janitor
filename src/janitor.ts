@@ -1,7 +1,11 @@
 import type { Session } from "@opencode-ai/sdk";
 
 import { getCleanupOptions, resolveConfigFromSources } from "./config.js";
-import type { SessionJanitorConfig, SessionJanitorTrigger } from "./config.js";
+import type {
+  ResolvedSessionJanitorConfig,
+  SessionJanitorConfig,
+  SessionJanitorTrigger,
+} from "./config.js";
 import { loadSessionJanitorConfigFile } from "./config-file.js";
 import type { ConfigFileLoadResult } from "./config-file.js";
 import type { EvaluationResult } from "./evaluate.js";
@@ -30,6 +34,8 @@ import type {
 export type { SessionJanitorClient } from "./janitor-session-client.js";
 
 const serviceName = "opencode-session-janitor";
+const startupDryRunWarning =
+  "dryRun:false ignored because startup runs are dry-run only.";
 
 type LogResult =
   | { ok: true }
@@ -109,9 +115,9 @@ export async function runSessionJanitor({
     );
   }
 
-  const config = validation.config;
-  const mode = config.dryRun ? "dry-run" : "delete";
   const warnings = [...validation.warnings];
+  const config = applyStartupDryRun(validation.config, warnings, trigger);
+  const mode = config.dryRun ? "dry-run" : "delete";
   const verifiedCurrentSessionID = isNonEmptyString(currentSessionID)
     ? currentSessionID
     : undefined;
@@ -350,6 +356,19 @@ export async function runSessionJanitor({
       metadata,
     },
   );
+}
+
+function applyStartupDryRun(
+  config: ResolvedSessionJanitorConfig,
+  warnings: string[],
+  trigger: SessionJanitorTrigger,
+): ResolvedSessionJanitorConfig {
+  if (trigger !== "startup" || config.dryRun) {
+    return config;
+  }
+
+  warnings.push(startupDryRunWarning);
+  return { ...config, dryRun: true };
 }
 
 function buildMetadata(input: {

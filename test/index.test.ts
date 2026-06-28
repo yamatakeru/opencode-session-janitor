@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { server as SessionJanitorPlugin } from "../src/index.js";
+import { daysAgo, makeSession, NOW } from "./helpers.js";
 
 describe("SessionJanitorPlugin", () => {
   it("keeps the package root plugin-only", async () => {
@@ -28,10 +29,10 @@ describe("SessionJanitorPlugin", () => {
     );
   });
 
-  it("does not register an agent-callable session_janitor custom tool", async () => {
+  it("runs a startup dry-run without registering an agent-callable tool", async () => {
     const client = {
       session: {
-        list: vi.fn(async () => ({ data: [] })),
+        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
         delete: vi.fn(async () => ({ data: true })),
       },
       app: {
@@ -39,21 +40,87 @@ describe("SessionJanitorPlugin", () => {
       },
     };
 
-    const hooks = await SessionJanitorPlugin(
-      {
-        client,
-        project: {},
-        directory: "/work/project",
-        worktree: "/work/project",
-        experimental_workspace: { register: vi.fn() },
-        serverUrl: new URL("http://localhost"),
-        $: vi.fn(),
-      } as never,
-      {},
-    );
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
 
-    expect(hooks).not.toHaveProperty("tool");
-    expect(client.session.list).not.toHaveBeenCalled();
+    try {
+      const hooks = await SessionJanitorPlugin(createPluginInput(client), {
+        dryRun: false,
+      });
+
+      expect(hooks).not.toHaveProperty("tool");
+      expect(client.session.list).toHaveBeenCalledOnce();
+      expect(client.session.delete).not.toHaveBeenCalled();
+      expect(client.app.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            level: "info",
+            message: "Session janitor dry-run completed",
+            extra: expect.objectContaining({
+              trigger: "startup",
+              mode: "dry-run",
+              candidateCount: 1,
+              warnings: expect.arrayContaining([
+                "dryRun:false ignored because startup runs are dry-run only.",
+              ]),
+            }),
+          }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails visibly when startup dry-run cannot be logged", async () => {
+    const client = {
+      session: {
+        list: vi.fn(async () => ({ data: [] })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+    };
+
+    await expect(
+      SessionJanitorPlugin(createPluginInput(client)),
+    ).rejects.toThrow("Session janitor startup dry-run could not be logged");
+    expect(client.session.list).toHaveBeenCalledOnce();
+    expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
+  it("fails visibly when startup dry-run evaluation fails", async () => {
+    const client = {
+      session: {
+        list: vi.fn(async () => ({ error: { message: "boom" } })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi.fn(async () => ({ data: true })),
+      },
+    };
+
+    await expect(
+      SessionJanitorPlugin(createPluginInput(client)),
+    ).rejects.toThrow("Session janitor startup dry-run failed");
+    expect(client.app.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          level: "error",
+          message: "Session janitor failed to list sessions",
+        }),
+      }),
+    );
     expect(client.session.delete).not.toHaveBeenCalled();
   });
 });
+
+function createPluginInput(client: unknown): never {
+  return {
+    client,
+    project: {},
+    directory: "/work/project",
+    worktree: "/work/project",
+    experimental_workspace: { register: vi.fn() },
+    serverUrl: new URL("http://localhost"),
+    $: vi.fn(),
+  } as never;
+}
