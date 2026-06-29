@@ -8,13 +8,10 @@ import {
   type SessionJanitorPluginOptions,
 } from "./config.js";
 import { loadSessionJanitorConfigFile } from "./config-file.js";
+import { safeShowTuiToast, shouldNotifyTui } from "./janitor-notifier.js";
+import { runSessionJanitor } from "./janitor.js";
 import type { SessionJanitorClient } from "./janitor-session-client.js";
 import { formatUnknownError } from "./janitor-session-client.js";
-import {
-  runSessionJanitor,
-  safeShowTuiToast,
-  shouldNotifyTui,
-} from "./janitor.js";
 
 const serviceName = "opencode-session-janitor";
 const delayedStartupToastDelayMs = 3000;

@@ -11,7 +11,6 @@ import type { ConfigFileLoadResult } from "./config-file.js";
 import type { EvaluationResult } from "./evaluate.js";
 import { evaluateSessions } from "./evaluate.js";
 import {
-  appendLoggingWarning,
   renderCancelled,
   renderEvaluationError,
   renderGuardError,
@@ -19,22 +18,22 @@ import {
   renderResult,
   renderValidationError,
 } from "./janitor-output.js";
+import { finalizeWithLog } from "./janitor-notifier.js";
 import {
   deleteSession,
   formatUnknownError,
   listSessions,
   RecoverableDeleteFailureError,
-  unwrapResponse,
 } from "./janitor-session-client.js";
 import type {
   LogLevel,
   SessionJanitorClient,
-  TuiToastVariant,
 } from "./janitor-session-client.js";
 
 export type { SessionJanitorClient } from "./janitor-session-client.js";
+export { safeShowTuiToast, shouldNotifyTui } from "./janitor-notifier.js";
+export type { LogResult } from "./janitor-notifier.js";
 
-const serviceName = "opencode-session-janitor";
 const autoDeleteRequiresAllowWarning =
   "dryRun:false ignored because startup auto delete requires allowAutoDelete:true.";
 const autoDeleteRequiresCurrentSessionProtectionWarning =
@@ -43,13 +42,6 @@ const autoDeleteSharedUnsupportedWarning =
   "dryRun:false ignored because startup auto delete does not support includeShared:true.";
 const nonStartupDryRunWarning =
   "dryRun:false ignored because automatic deletion is only supported for trigger:startup.";
-
-export type LogResult =
-  | { ok: true }
-  | {
-      ok: false;
-      error: string;
-    };
 
 export type RunSessionJanitorInput = {
   client: SessionJanitorClient;
@@ -502,157 +494,6 @@ function readNotifyTuiPreference(value: unknown): boolean | undefined {
 
   const notifyTui = (value as { notifyTui?: unknown }).notifyTui;
   return typeof notifyTui === "boolean" ? notifyTui : undefined;
-}
-
-async function finalizeWithLog(
-  client: SessionJanitorClient,
-  level: LogLevel,
-  message: string,
-  result: RunSessionJanitorResult,
-  options: { suppressTuiToast?: boolean } = {},
-): Promise<RunSessionJanitorResult> {
-  const tuiNotification = options.suppressTuiToast
-    ? ({ ok: false, error: "TUI toast suppressed" } as const)
-    : await safeShowTuiToast(client, result.metadata);
-  const metadata = { ...result.metadata, tuiNotification };
-  const logging = await safeLog(client, level, message, metadata);
-
-  return {
-    title: result.title,
-    output: appendLoggingWarning(result.output, logging),
-    metadata: {
-      ...metadata,
-      logging,
-    },
-  };
-}
-
-export async function safeShowTuiToast(
-  client: SessionJanitorClient,
-  metadata: Record<string, unknown>,
-): Promise<LogResult> {
-  if (!shouldNotifyTui(metadata)) {
-    return { ok: false, error: "TUI notifications are disabled" };
-  }
-  if (!client.tui?.showToast) {
-    return { ok: false, error: "client.tui.showToast is unavailable" };
-  }
-
-  try {
-    const response = await client.tui.showToast({
-      body: {
-        title: "Session Janitor",
-        message: buildTuiToastMessage(metadata),
-        variant: getTuiToastVariant(metadata),
-        duration: 10000,
-      },
-    });
-    if (isErrorResponse(response)) {
-      return {
-        ok: false,
-        error: `client.tui.showToast failed: ${formatUnknownError(response.error)}`,
-      };
-    }
-    if (isDataResponse(response) && response.data === false) {
-      return { ok: false, error: "client.tui.showToast returned false" };
-    }
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      error: `client.tui.showToast failed: ${formatUnknownError(error)}`,
-    };
-  }
-}
-
-export function shouldNotifyTui(metadata: Record<string, unknown>): boolean {
-  const config = metadata.config;
-  if (typeof config !== "object" || config === null) {
-    return false;
-  }
-
-  return (config as { notifyTui?: unknown }).notifyTui === true;
-}
-
-function buildTuiToastMessage(metadata: Record<string, unknown>): string {
-  const mode = typeof metadata.mode === "string" ? metadata.mode : "unknown";
-  if (metadata.ok !== true) {
-    return `Run failed (${mode}); check the app log for details.`;
-  }
-
-  const candidates = getCount(metadata.candidateCount);
-  const deleted = getCount(metadata.deletedCount);
-  const failed = getCount(metadata.failedCount);
-  if (mode === "delete") {
-    return `Delete completed: ${deleted} deleted, ${failed} failed, ${candidates} candidates.`;
-  }
-
-  return `Dry-run completed: ${candidates} cleanup candidates. No sessions were deleted.`;
-}
-
-function getTuiToastVariant(
-  metadata: Record<string, unknown>,
-): TuiToastVariant {
-  if (metadata.ok !== true) {
-    return "error";
-  }
-  if (metadata.mode === "delete") {
-    return getCount(metadata.deletedCount) > 0 ? "warning" : "success";
-  }
-  return getCount(metadata.candidateCount) > 0 ? "info" : "success";
-}
-
-function getCount(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function isErrorResponse(
-  value: unknown,
-): value is { error: unknown; data?: undefined } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "error" in value &&
-    value.error !== undefined
-  );
-}
-
-function isDataResponse(value: unknown): value is { data: unknown } {
-  return typeof value === "object" && value !== null && "data" in value;
-}
-
-async function safeLog(
-  client: SessionJanitorClient,
-  level: LogLevel,
-  message: string,
-  extra: Record<string, unknown>,
-): Promise<LogResult> {
-  if (!client.app?.log) {
-    return { ok: false, error: "client.app.log is unavailable" };
-  }
-
-  try {
-    const logged = unwrapResponse(
-      await client.app.log({
-        body: {
-          service: serviceName,
-          level,
-          message,
-          extra,
-        },
-      }),
-      "client.app.log",
-    );
-    if (logged !== true) {
-      return { ok: false, error: "client.app.log returned false" };
-    }
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      error: `client.app.log failed: ${formatUnknownError(error)}`,
-    };
-  }
 }
 
 function getDeleteLogLevel(
