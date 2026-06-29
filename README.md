@@ -51,10 +51,11 @@ When `notifyTui` is enabled, the plugin also attempts a short best-effort TUI
 toast summary. Toast failures are ignored because the TUI may not be connected
 yet; the app log remains the authoritative record.
 
-If auto delete is explicitly enabled, the plugin waits until it observes a
-session ID from an OpenCode session event, then performs at most one startup
-auto-delete run. This preserves current-session protection. Agent-callable
-deletion is not available.
+If auto delete is explicitly enabled, the startup dry-run arms at most one
+delete run. Deletion starts only after the plugin observes a trusted
+session-scoped hook, currently `chat.message` or `command.execute.before`, and
+uses that hook's `sessionID` for current-session protection. If no trusted hook
+is observed, no delete run starts. Agent-callable deletion is not available.
 
 ## Configuration
 
@@ -119,6 +120,8 @@ or deleting sessions.
 ## Safety
 
 - Startup auto delete requires `dryRun: false` and `allowAutoDelete: true`.
+- Startup auto delete also requires `trigger: "startup"` and
+  `excludeCurrentSession: true`.
 - First run with `dryRun: true` is strongly recommended before enabling delete.
 - The global config file is user-wide policy. Setting `dryRun: false` and
   `allowAutoDelete: true` there can enable startup auto delete in every project
@@ -129,6 +132,9 @@ or deleting sessions.
 - Sessions with missing, invalid, or ambiguous metadata are skipped.
 - Delete mode refuses to run if the current session cannot be identified while
   current-session protection is enabled.
+- Startup auto delete waits for a trusted `chat.message` or
+  `command.execute.before` hook before deleting, and does not use
+  `session.idle` or `session.status` events as the current-session source.
 - No agent-callable `session_janitor` tool is registered.
 - The plugin uses OpenCode session APIs and does not edit storage files directly.
 - Deletion is irreversible.
@@ -149,9 +155,11 @@ To enable automatic deletion, configure all required gates:
 }
 ```
 
-Auto delete runs once per plugin instance after the plugin observes the current
-session ID. `sessionIdle` auto delete is intentionally not enabled in this
-version because its trigger timing is harder to reason about safely.
+Auto delete is armed by the startup dry-run and runs once per plugin instance
+only after the plugin observes `chat.message` or `command.execute.before` for a
+trusted session ID. If neither trusted hook is observed, auto delete does not
+run. `session.idle` auto delete is intentionally not enabled in this version
+because its trigger timing is harder to reason about safely.
 
 ## Current Scope
 

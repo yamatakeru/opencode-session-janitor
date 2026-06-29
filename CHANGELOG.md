@@ -6,7 +6,8 @@
 - Removed the agent-callable `session_janitor` custom tool.
 - Removed per-run tool arguments as a cleanup policy source.
 - Added explicit opt-in startup auto delete behind `dryRun: false` and `allowAutoDelete: true`.
-- Changed plugin startup to run an initial forced dry-run, then wait for a session ID before any auto delete.
+- Changed startup auto delete to arm after the initial forced dry-run, then wait for a trusted `chat.message` or `command.execute.before` session hook before deleting.
+- Stopped using generic `session.idle` or `session.status` events as the current-session source for startup auto delete.
 - Added best-effort TUI toast summaries via `notifyTui`.
 - Allowed explicit `includeShared: true` startup auto delete to delete old shared sessions.
 - Added user-wide config loading from `~/.config/opencode/session-janitor.json` with project config overriding global config.

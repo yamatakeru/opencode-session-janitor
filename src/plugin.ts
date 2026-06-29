@@ -1,5 +1,4 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import type { Event } from "@opencode-ai/sdk";
 
 import {
   getCleanupOptions,
@@ -29,6 +28,11 @@ type StartupLoggingResult =
       error: string;
     };
 type StartupRunKind = "dry-run" | "auto delete";
+type TrustedSessionSource = "chat.message" | "command.execute.before";
+type TrustedStartupSessionObservation = {
+  trustedSessionID: string;
+  trustedSessionSource: TrustedSessionSource;
+};
 type StartupAutoDeleteConfigResult =
   | { kind: "ready"; config: ResolvedSessionJanitorConfig }
   | { kind: "not-enabled" }
@@ -40,6 +44,10 @@ const SessionJanitorPlugin: Plugin = async function SessionJanitorPlugin(
 ) {
   const pluginOptions = options as SessionJanitorPluginOptions | undefined;
   let autoDeleteStarted = false;
+  let autoDeleteBlocked = false;
+  let autoDeleteRunCompleted = false;
+  let autoDeleteAbortController: AbortController | undefined;
+  let trustedStartupSession: TrustedStartupSessionObservation | undefined;
   const startupDryRun = Promise.resolve()
     .then(() =>
       runSessionJanitor({
@@ -63,31 +71,94 @@ const SessionJanitorPlugin: Plugin = async function SessionJanitorPlugin(
 
   void startupDryRun;
 
-  return {
-    event: async ({ event }) => {
-      if (autoDeleteStarted) {
-        return;
-      }
+  function observeTrustedStartupSession({
+    trustedSessionID,
+    trustedSessionSource,
+  }: TrustedStartupSessionObservation): void {
+    const normalizedTrustedSessionID = trustedSessionID.trim();
 
-      const currentSessionID = getCurrentSessionIDFromEvent(event);
-      if (currentSessionID === undefined) {
-        return;
-      }
+    if (normalizedTrustedSessionID.length === 0) {
+      return;
+    }
+    if (normalizedTrustedSessionID !== trustedSessionID) {
+      blockStartupAutoDeleteFromTrustedSession({
+        trustedSessionSource,
+        errors: [
+          "Refusing startup auto delete because trusted sessionID was not normalized.",
+        ],
+      });
+      return;
+    }
 
-      autoDeleteStarted = true;
+    const observation = {
+      trustedSessionID: normalizedTrustedSessionID,
+      trustedSessionSource,
+    };
+
+    if (
+      trustedStartupSession &&
+      trustedStartupSession.trustedSessionID !== observation.trustedSessionID
+    ) {
+      if (!autoDeleteRunCompleted) {
+        blockStartupAutoDeleteFromTrustedSession({
+          trustedSessionSource,
+          errors: [
+            "Refusing startup auto delete because multiple trusted session hooks reported different session IDs.",
+          ],
+          extra: {
+            firstTrustedSessionSource:
+              trustedStartupSession.trustedSessionSource,
+            conflictingTrustedSessionSource: trustedSessionSource,
+          },
+        });
+      }
+      return;
+    }
+
+    if (autoDeleteStarted) {
+      return;
+    }
+
+    trustedStartupSession = observation;
+    autoDeleteStarted = true;
+    void startStartupAutoDeleteFromTrustedSession(observation).catch(
+      (error: unknown) => {
+        void reportStartupError("auto delete", input.client, error, {
+          autoDeleteTrigger: "startup-armed",
+          trustedSessionSource,
+        });
+      },
+    );
+  }
+
+  async function startStartupAutoDeleteFromTrustedSession({
+    trustedSessionID,
+    trustedSessionSource,
+  }: TrustedStartupSessionObservation): Promise<void> {
+    const blockLogMetadata =
+      getTrustedStartupAutoDeleteMetadata(trustedSessionSource);
+
+    try {
       const dryRunResult = await startupDryRun;
+      if (autoDeleteBlocked) {
+        return;
+      }
       if (dryRunResult?.metadata.ok !== true) {
         return;
       }
       const dryRunLogging = dryRunResult.metadata.logging;
       if (isStartupLoggingFailure(dryRunLogging)) {
-        await reportStartupAutoDeleteBlocked(input.client, {
-          kind: "blocked",
-          errors: [
-            `Refusing startup auto delete because the startup dry-run could not be logged: ${dryRunLogging.error}`,
-          ],
-          warnings: [],
-        });
+        await reportStartupAutoDeleteBlocked(
+          input.client,
+          {
+            kind: "blocked",
+            errors: [
+              `Refusing startup auto delete because the startup dry-run could not be logged: ${dryRunLogging.error}`,
+            ],
+            warnings: [],
+          },
+          blockLogMetadata,
+        );
         return;
       }
 
@@ -96,7 +167,11 @@ const SessionJanitorPlugin: Plugin = async function SessionJanitorPlugin(
         configFileBaseDir: input.worktree,
       });
       if (autoDeleteConfig.kind === "blocked") {
-        await reportStartupAutoDeleteBlocked(input.client, autoDeleteConfig);
+        await reportStartupAutoDeleteBlocked(
+          input.client,
+          autoDeleteConfig,
+          blockLogMetadata,
+        );
         return;
       }
       if (autoDeleteConfig.kind !== "ready") {
@@ -108,17 +183,26 @@ const SessionJanitorPlugin: Plugin = async function SessionJanitorPlugin(
           autoDeleteConfig.config,
         )
       ) {
-        await reportStartupAutoDeleteBlocked(input.client, {
-          kind: "blocked",
-          errors: [
-            "Refusing startup auto delete because config changed after the startup dry-run.",
-          ],
-          warnings: [],
-        });
+        await reportStartupAutoDeleteBlocked(
+          input.client,
+          {
+            kind: "blocked",
+            errors: [
+              "Refusing startup auto delete because config changed after the startup dry-run.",
+            ],
+            warnings: [],
+          },
+          blockLogMetadata,
+        );
+        return;
+      }
+      if (autoDeleteBlocked) {
         return;
       }
 
-      void runSessionJanitor({
+      const abortController = new AbortController();
+      autoDeleteAbortController = abortController;
+      const result = await runSessionJanitor({
         client: input.client,
         pluginOptions: {
           ...autoDeleteConfig.config,
@@ -126,13 +210,61 @@ const SessionJanitorPlugin: Plugin = async function SessionJanitorPlugin(
           projectConfigFile: false,
         },
         configFileBaseDir: input.worktree,
-        currentSessionID,
+        currentSessionID: trustedSessionID,
         trigger: "startup",
-      })
-        .then((result) => reportStartupResultProblems("auto delete", result))
-        .catch((error: unknown) => {
-          void reportStartupError("auto delete", input.client, error);
-        });
+        abortSignal: abortController.signal,
+      });
+      reportStartupResultProblems("auto delete", result);
+    } finally {
+      autoDeleteRunCompleted = true;
+    }
+  }
+
+  function blockStartupAutoDeleteFromTrustedSession({
+    trustedSessionSource,
+    errors,
+    extra = {},
+  }: {
+    trustedSessionSource: TrustedSessionSource;
+    errors: string[];
+    extra?: Record<string, unknown>;
+  }): void {
+    if (autoDeleteBlocked) {
+      return;
+    }
+
+    autoDeleteBlocked = true;
+    autoDeleteStarted = true;
+    autoDeleteAbortController?.abort();
+    const metadata = getTrustedStartupAutoDeleteMetadata(
+      trustedSessionSource,
+      extra,
+    );
+    void reportStartupAutoDeleteBlocked(
+      input.client,
+      {
+        kind: "blocked",
+        errors,
+        warnings: [],
+      },
+      metadata,
+    ).catch((error: unknown) => {
+      void reportStartupError("auto delete", input.client, error, metadata);
+    });
+  }
+
+  return {
+    "chat.message": async (hookInput) => {
+      observeTrustedStartupSession({
+        trustedSessionID: hookInput.sessionID,
+        trustedSessionSource: "chat.message",
+      });
+    },
+    "command.execute.before": async (hookInput) => {
+      observeTrustedStartupSession({
+        trustedSessionID: hookInput.sessionID,
+        trustedSessionSource: "command.execute.before",
+      });
     },
   };
 };
@@ -303,27 +435,15 @@ function matchesForcedDryRunConfig(
   );
 }
 
-function getCurrentSessionIDFromEvent(event: Event): string | undefined {
-  if (!isCurrentSessionEvent(event.type)) {
-    return undefined;
-  }
-
-  const properties = (event as { properties?: Record<string, unknown> })
-    .properties;
-  if (!properties) {
-    return undefined;
-  }
-
-  const sessionID = properties.sessionID;
-  if (typeof sessionID === "string" && sessionID.trim().length > 0) {
-    return sessionID;
-  }
-
-  return undefined;
-}
-
-function isCurrentSessionEvent(type: Event["type"]): boolean {
-  return type === "session.idle" || type === "session.status";
+function getTrustedStartupAutoDeleteMetadata(
+  trustedSessionSource: TrustedSessionSource,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    autoDeleteTrigger: "startup-armed",
+    trustedSessionSource,
+    ...extra,
+  };
 }
 
 function reportStartupResultProblems(
@@ -345,6 +465,7 @@ function reportStartupResultProblems(
 async function reportStartupAutoDeleteBlocked(
   client: SessionJanitorClient,
   result: Extract<StartupAutoDeleteConfigResult, { kind: "blocked" }>,
+  extra: Record<string, unknown> = {},
 ): Promise<void> {
   const level = result.errors.length > 0 ? "error" : "warn";
   const message = "Session janitor startup auto delete blocked";
@@ -353,6 +474,7 @@ async function reportStartupAutoDeleteBlocked(
     try {
       await logToApp(client, level, message, {
         trigger: "startup",
+        ...extra,
         errors: result.errors,
         warnings: result.warnings,
       });
@@ -399,6 +521,7 @@ async function reportStartupError(
   kind: StartupRunKind,
   client: SessionJanitorClient,
   error: unknown,
+  extra: Record<string, unknown> = {},
 ): Promise<void> {
   const formatted = formatUnknownError(error);
   if (client.app?.log) {
@@ -409,6 +532,7 @@ async function reportStartupError(
         `Session janitor startup ${kind} failed unexpectedly`,
         {
           trigger: "startup",
+          ...extra,
           error: formatted,
         },
       );
