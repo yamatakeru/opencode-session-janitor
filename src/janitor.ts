@@ -2,7 +2,7 @@ import type { Session } from "@opencode-ai/sdk";
 
 import { getCleanupOptions, resolveConfigFromOptionSources } from "./config.js";
 import type {
-  ResolvedSessionJanitorConfig,
+  ConfigValidationResult,
   SessionJanitorConfig,
   SessionJanitorTrigger,
 } from "./config.js";
@@ -20,6 +20,11 @@ import {
 } from "./janitor-output.js";
 import { finalizeWithLog } from "./janitor-notifier.js";
 import {
+  applyAutoDeleteGate,
+  applyForcedDryRun,
+  getDeleteBlockedByWarningsErrors,
+} from "./janitor-policy.js";
+import {
   deleteSession,
   formatUnknownError,
   listSessions,
@@ -33,13 +38,6 @@ import type {
 export type { SessionJanitorClient } from "./janitor-session-client.js";
 export { safeShowTuiToast, shouldNotifyTui } from "./janitor-notifier.js";
 export type { LogResult } from "./janitor-notifier.js";
-
-const autoDeleteRequiresAllowWarning =
-  "dryRun:false ignored because startup auto delete requires allowAutoDelete:true.";
-const autoDeleteRequiresCurrentSessionProtectionWarning =
-  "dryRun:false ignored because startup auto delete requires excludeCurrentSession:true.";
-const nonStartupDryRunWarning =
-  "dryRun:false ignored because automatic deletion is only supported for trigger:startup.";
 
 export type RunSessionJanitorInput = {
   client: SessionJanitorClient;
@@ -96,39 +94,25 @@ export async function runSessionJanitor({
   const invalidConfigNotificationConfig = {
     notifyTui: getNotifyTuiPreference(configFile.options, pluginCleanupOptions),
   };
-  const validation =
-    configFile.errors.length > 0
-      ? {
-          ok: false as const,
-          errors: configFile.errors,
-          warnings: configFile.warnings,
-        }
-      : resolveConfigFromOptionSources(
-          configFile.optionSources,
-          pluginCleanupOptions,
-        );
-  const validationWarnings =
-    configFile.errors.length > 0
-      ? validation.warnings
-      : [...configFile.warnings, ...validation.warnings];
+  const validation = resolveLoadedConfig(configFile, pluginCleanupOptions);
   if (!validation.ok) {
     const metadata = {
       ok: false,
       trigger,
       mode: "validation-error",
       errors: validation.errors,
-      warnings: validationWarnings,
+      warnings: validation.warnings,
       config: invalidConfigNotificationConfig,
       configFile: configFileMetadata,
     };
     return finalizeRun("warn", "Session janitor validation failed", {
       title: "Session janitor validation failed",
-      output: renderValidationError(validation.errors, validationWarnings),
+      output: renderValidationError(validation.errors, validation.warnings),
       metadata,
     });
   }
 
-  const warnings = validationWarnings;
+  const warnings = validation.warnings;
   const config = forceDryRun
     ? applyForcedDryRun(validation.config, warnings)
     : applyAutoDeleteGate(validation.config, warnings, trigger);
@@ -138,10 +122,7 @@ export async function runSessionJanitor({
     : undefined;
 
   if (!config.dryRun && warnings.length > 0) {
-    const errors = warnings.map(
-      (warning) =>
-        `Refusing delete because configuration was not fully recognized: ${warning}`,
-    );
+    const errors = getDeleteBlockedByWarningsErrors(warnings);
     const metadata = {
       ok: false,
       trigger,
@@ -363,54 +344,6 @@ export async function runSessionJanitor({
   );
 }
 
-function applyAutoDeleteGate(
-  config: ResolvedSessionJanitorConfig,
-  warnings: string[],
-  trigger: SessionJanitorTrigger,
-): ResolvedSessionJanitorConfig {
-  if (config.dryRun) {
-    return config;
-  }
-
-  const gateWarnings = getAutoDeleteGateWarnings(config, trigger);
-  if (gateWarnings.length === 0) {
-    return config;
-  }
-
-  warnings.push(...gateWarnings);
-  return { ...config, dryRun: true };
-}
-
-function applyForcedDryRun(
-  config: ResolvedSessionJanitorConfig,
-  warnings: string[],
-): ResolvedSessionJanitorConfig {
-  if (config.dryRun) {
-    return config;
-  }
-
-  warnings.push("dryRun:false ignored because this run was forced to dry-run.");
-  return { ...config, dryRun: true };
-}
-
-function getAutoDeleteGateWarnings(
-  config: ResolvedSessionJanitorConfig,
-  trigger: SessionJanitorTrigger,
-): string[] {
-  const warnings: string[] = [];
-
-  if (trigger !== "startup") {
-    warnings.push(nonStartupDryRunWarning);
-  }
-  if (!config.allowAutoDelete) {
-    warnings.push(autoDeleteRequiresAllowWarning);
-  }
-  if (!config.excludeCurrentSession) {
-    warnings.push(autoDeleteRequiresCurrentSessionProtectionWarning);
-  }
-  return warnings;
-}
-
 function buildMetadata(input: {
   ok: boolean;
   trigger: SessionJanitorTrigger;
@@ -467,6 +400,37 @@ function renderCancelledResult(
       configFile,
     },
   });
+}
+
+function resolveLoadedConfig(
+  configFile: ConfigFileLoadResult,
+  pluginCleanupOptions: unknown,
+): ConfigValidationResult {
+  if (configFile.errors.length > 0) {
+    return {
+      ok: false,
+      errors: configFile.errors,
+      warnings: configFile.warnings,
+    };
+  }
+
+  const validation = resolveConfigFromOptionSources(
+    configFile.optionSources,
+    pluginCleanupOptions,
+  );
+  if (!validation.ok) {
+    return {
+      ok: false,
+      errors: validation.errors,
+      warnings: [...configFile.warnings, ...validation.warnings],
+    };
+  }
+
+  return {
+    ok: true,
+    config: validation.config,
+    warnings: [...configFile.warnings, ...validation.warnings],
+  };
 }
 
 function buildConfigFileMetadata(
