@@ -8,6 +8,7 @@ export type SessionJanitorConfig = {
   maxDeleteCount?: number | "unlimited";
   trigger?: SessionJanitorTrigger;
   allowAutoDelete?: boolean;
+  notifyTui?: boolean;
 };
 
 export type SessionJanitorPluginOptions = SessionJanitorConfig & {
@@ -24,6 +25,7 @@ export const defaultSessionJanitorConfig = {
   maxDeleteCount: 10,
   trigger: "startup",
   allowAutoDelete: false,
+  notifyTui: true,
 } satisfies ResolvedSessionJanitorConfig;
 
 export type ConfigValidationResult =
@@ -46,6 +48,7 @@ const configKeys = [
   "maxDeleteCount",
   "trigger",
   "allowAutoDelete",
+  "notifyTui",
 ] as const;
 
 const configKeySet = new Set<string>(configKeys);
@@ -87,6 +90,9 @@ export function resolveConfigFromSources(
   if (typeof merged.allowAutoDelete !== "boolean") {
     errors.push("allowAutoDelete must be boolean");
   }
+  if (typeof merged.notifyTui !== "boolean") {
+    errors.push("notifyTui must be boolean");
+  }
 
   if (errors.length > 0) {
     return { ok: false, errors, warnings };
@@ -102,6 +108,7 @@ export function resolveConfigFromSources(
       maxDeleteCount: merged.maxDeleteCount,
       trigger: merged.trigger,
       allowAutoDelete: merged.allowAutoDelete,
+      notifyTui: merged.notifyTui,
     } as ResolvedSessionJanitorConfig,
     warnings,
   };

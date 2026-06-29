@@ -29,6 +29,7 @@ import {
 import type {
   LogLevel,
   SessionJanitorClient,
+  TuiToastVariant,
 } from "./janitor-session-client.js";
 
 export type { SessionJanitorClient } from "./janitor-session-client.js";
@@ -43,7 +44,7 @@ const autoDeleteSharedUnsupportedWarning =
 const nonStartupDryRunWarning =
   "dryRun:false ignored because automatic deletion is only supported for trigger:startup.";
 
-type LogResult =
+export type LogResult =
   | { ok: true }
   | {
       ok: false;
@@ -59,6 +60,7 @@ export type RunSessionJanitorInput = {
   now?: number;
   abortSignal?: AbortSignal;
   forceDryRun?: boolean;
+  suppressTuiToast?: boolean;
 };
 
 export type DeleteSuccess = {
@@ -87,13 +89,23 @@ export async function runSessionJanitor({
   now = Date.now(),
   abortSignal,
   forceDryRun = false,
+  suppressTuiToast = false,
 }: RunSessionJanitorInput): Promise<RunSessionJanitorResult> {
+  const finalizeRun = (
+    level: LogLevel,
+    message: string,
+    result: RunSessionJanitorResult,
+  ) => finalizeWithLog(client, level, message, result, { suppressTuiToast });
+
   const configFile = await loadSessionJanitorConfigFile({
     baseDir: configFileBaseDir,
     pluginOptions,
   });
   const configFileMetadata = buildConfigFileMetadata(configFile);
   const pluginCleanupOptions = getCleanupOptions(pluginOptions);
+  const invalidConfigNotificationConfig = {
+    notifyTui: getNotifyTuiPreference(configFile.options, pluginCleanupOptions),
+  };
   const validation =
     configFile.errors.length > 0
       ? {
@@ -109,18 +121,14 @@ export async function runSessionJanitor({
       mode: "validation-error",
       errors: validation.errors,
       warnings: validation.warnings,
+      config: invalidConfigNotificationConfig,
       configFile: configFileMetadata,
     };
-    return finalizeWithLog(
-      client,
-      "warn",
-      "Session janitor validation failed",
-      {
-        title: "Session janitor validation failed",
-        output: renderValidationError(validation.errors, validation.warnings),
-        metadata,
-      },
-    );
+    return finalizeRun("warn", "Session janitor validation failed", {
+      title: "Session janitor validation failed",
+      output: renderValidationError(validation.errors, validation.warnings),
+      metadata,
+    });
   }
 
   const warnings = [...validation.warnings];
@@ -143,10 +151,10 @@ export async function runSessionJanitor({
       mode: "validation-error",
       errors,
       warnings,
+      config,
       configFile: configFileMetadata,
     };
-    return finalizeWithLog(
-      client,
+    return finalizeRun(
       "error",
       "Session janitor delete blocked by config warnings",
       {
@@ -167,10 +175,11 @@ export async function runSessionJanitor({
         trigger,
         mode,
         error: message,
+        config,
         warnings,
         configFile: configFileMetadata,
       };
-      return finalizeWithLog(client, "error", "Session janitor guard failed", {
+      return finalizeRun("error", "Session janitor guard failed", {
         title: "Session janitor guard failed",
         output: renderGuardError(message, warnings),
         metadata,
@@ -186,6 +195,7 @@ export async function runSessionJanitor({
       trigger,
       warnings,
       "before-list",
+      config,
       configFileMetadata,
     );
   }
@@ -201,19 +211,15 @@ export async function runSessionJanitor({
       trigger,
       mode,
       error: message,
+      config,
       warnings,
       configFile: configFileMetadata,
     };
-    return finalizeWithLog(
-      client,
-      "error",
-      "Session janitor failed to list sessions",
-      {
-        title: "Session janitor failed",
-        output: renderListError(message, warnings),
-        metadata,
-      },
-    );
+    return finalizeRun("error", "Session janitor failed to list sessions", {
+      title: "Session janitor failed",
+      output: renderListError(message, warnings),
+      metadata,
+    });
   }
 
   if (abortSignal?.aborted) {
@@ -222,6 +228,7 @@ export async function runSessionJanitor({
       trigger,
       warnings,
       "after-list",
+      config,
       configFileMetadata,
     );
   }
@@ -241,19 +248,15 @@ export async function runSessionJanitor({
       trigger,
       mode,
       error: message,
+      config,
       warnings,
       configFile: configFileMetadata,
     };
-    return finalizeWithLog(
-      client,
-      "error",
-      "Session janitor failed to evaluate sessions",
-      {
-        title: "Session janitor failed",
-        output: renderEvaluationError(message, warnings),
-        metadata,
-      },
-    );
+    return finalizeRun("error", "Session janitor failed to evaluate sessions", {
+      title: "Session janitor failed",
+      output: renderEvaluationError(message, warnings),
+      metadata,
+    });
   }
 
   if (abortSignal?.aborted) {
@@ -262,6 +265,7 @@ export async function runSessionJanitor({
       trigger,
       warnings,
       "after-evaluation",
+      config,
       configFileMetadata,
     );
   }
@@ -278,24 +282,19 @@ export async function runSessionJanitor({
       failed: [],
       configFile: configFileMetadata,
     });
-    return finalizeWithLog(
-      client,
-      "info",
-      "Session janitor dry-run completed",
-      {
-        title: "Session janitor dry-run",
-        output: renderResult({
-          trigger,
-          mode,
-          config,
-          warnings,
-          evaluation,
-          deleted: [],
-          failed: [],
-        }),
-        metadata,
-      },
-    );
+    return finalizeRun("info", "Session janitor dry-run completed", {
+      title: "Session janitor dry-run",
+      output: renderResult({
+        trigger,
+        mode,
+        config,
+        warnings,
+        evaluation,
+        deleted: [],
+        failed: [],
+      }),
+      metadata,
+    });
   }
 
   const deleted: DeleteSuccess[] = [];
@@ -345,8 +344,7 @@ export async function runSessionJanitor({
     configFile: configFileMetadata,
   });
 
-  return finalizeWithLog(
-    client,
+  return finalizeRun(
     getDeleteLogLevel(failed, wasAborted),
     wasAborted
       ? "Session janitor delete aborted"
@@ -458,6 +456,7 @@ function renderCancelledResult(
   trigger: SessionJanitorTrigger,
   warnings: string[],
   stage: "before-list" | "after-list" | "after-evaluation",
+  config: SessionJanitorConfig,
   configFile: Record<string, unknown>,
 ): Promise<RunSessionJanitorResult> {
   const message = "Session janitor was cancelled by the user.";
@@ -470,6 +469,7 @@ function renderCancelledResult(
       mode: "cancelled",
       cancellationStage: stage,
       error: message,
+      config,
       warnings,
       configFile,
     },
@@ -486,22 +486,139 @@ function buildConfigFileMetadata(
   };
 }
 
+function getNotifyTuiPreference(
+  configFileOptions: unknown,
+  pluginOptions: unknown,
+): boolean {
+  const configFileValue = readNotifyTuiPreference(configFileOptions);
+  const pluginValue = readNotifyTuiPreference(pluginOptions);
+  return pluginValue ?? configFileValue ?? true;
+}
+
+function readNotifyTuiPreference(value: unknown): boolean | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const notifyTui = (value as { notifyTui?: unknown }).notifyTui;
+  return typeof notifyTui === "boolean" ? notifyTui : undefined;
+}
+
 async function finalizeWithLog(
   client: SessionJanitorClient,
   level: LogLevel,
   message: string,
   result: RunSessionJanitorResult,
+  options: { suppressTuiToast?: boolean } = {},
 ): Promise<RunSessionJanitorResult> {
-  const logging = await safeLog(client, level, message, result.metadata);
+  const tuiNotification = options.suppressTuiToast
+    ? ({ ok: false, error: "TUI toast suppressed" } as const)
+    : await safeShowTuiToast(client, result.metadata);
+  const metadata = { ...result.metadata, tuiNotification };
+  const logging = await safeLog(client, level, message, metadata);
 
   return {
     title: result.title,
     output: appendLoggingWarning(result.output, logging),
     metadata: {
-      ...result.metadata,
+      ...metadata,
       logging,
     },
   };
+}
+
+export async function safeShowTuiToast(
+  client: SessionJanitorClient,
+  metadata: Record<string, unknown>,
+): Promise<LogResult> {
+  if (!shouldNotifyTui(metadata)) {
+    return { ok: false, error: "TUI notifications are disabled" };
+  }
+  if (!client.tui?.showToast) {
+    return { ok: false, error: "client.tui.showToast is unavailable" };
+  }
+
+  try {
+    const response = await client.tui.showToast({
+      body: {
+        title: "Session Janitor",
+        message: buildTuiToastMessage(metadata),
+        variant: getTuiToastVariant(metadata),
+        duration: 10000,
+      },
+    });
+    if (isErrorResponse(response)) {
+      return {
+        ok: false,
+        error: `client.tui.showToast failed: ${formatUnknownError(response.error)}`,
+      };
+    }
+    if (isDataResponse(response) && response.data === false) {
+      return { ok: false, error: "client.tui.showToast returned false" };
+    }
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: `client.tui.showToast failed: ${formatUnknownError(error)}`,
+    };
+  }
+}
+
+export function shouldNotifyTui(metadata: Record<string, unknown>): boolean {
+  const config = metadata.config;
+  if (typeof config !== "object" || config === null) {
+    return false;
+  }
+
+  return (config as { notifyTui?: unknown }).notifyTui === true;
+}
+
+function buildTuiToastMessage(metadata: Record<string, unknown>): string {
+  const mode = typeof metadata.mode === "string" ? metadata.mode : "unknown";
+  if (metadata.ok !== true) {
+    return `Run failed (${mode}); check the app log for details.`;
+  }
+
+  const candidates = getCount(metadata.candidateCount);
+  const deleted = getCount(metadata.deletedCount);
+  const failed = getCount(metadata.failedCount);
+  if (mode === "delete") {
+    return `Delete completed: ${deleted} deleted, ${failed} failed, ${candidates} candidates.`;
+  }
+
+  return `Dry-run completed: ${candidates} cleanup candidates. No sessions were deleted.`;
+}
+
+function getTuiToastVariant(
+  metadata: Record<string, unknown>,
+): TuiToastVariant {
+  if (metadata.ok !== true) {
+    return "error";
+  }
+  if (metadata.mode === "delete") {
+    return getCount(metadata.deletedCount) > 0 ? "warning" : "success";
+  }
+  return getCount(metadata.candidateCount) > 0 ? "info" : "success";
+}
+
+function getCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function isErrorResponse(
+  value: unknown,
+): value is { error: unknown; data?: undefined } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "error" in value &&
+    value.error !== undefined
+  );
+}
+
+function isDataResponse(value: unknown): value is { data: unknown } {
+  return typeof value === "object" && value !== null && "data" in value;
 }
 
 async function safeLog(

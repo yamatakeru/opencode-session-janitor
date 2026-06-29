@@ -27,9 +27,59 @@ describe("runSessionJanitor", () => {
         body: expect.objectContaining({
           level: "info",
           message: "Session janitor dry-run completed",
+          extra: expect.objectContaining({
+            tuiNotification: { ok: true },
+          }),
         }),
       }),
     );
+    expect(client.tui?.showToast).toHaveBeenCalledWith({
+      body: {
+        title: "Session Janitor",
+        message:
+          "Dry-run completed: 0 cleanup candidates. No sessions were deleted.",
+        variant: "success",
+        duration: 10000,
+      },
+    });
+    expect(result.metadata.tuiNotification).toEqual({ ok: true });
+  });
+
+  it("does not show a TUI toast when disabled", async () => {
+    const { client } = createClient([]);
+
+    const result = await runSessionJanitor({
+      client,
+      pluginOptions: { notifyTui: false },
+      currentSessionID: "current",
+      now: NOW,
+    });
+
+    expect(client.tui?.showToast).not.toHaveBeenCalled();
+    expect(result.metadata.tuiNotification).toEqual({
+      ok: false,
+      error: "TUI notifications are disabled",
+    });
+  });
+
+  it("does not fail a run when TUI toast fails", async () => {
+    const { client } = createClient([]);
+    client.tui!.showToast = vi.fn(async () => ({
+      data: undefined,
+      error: { message: "not connected" },
+    }));
+
+    const result = await runSessionJanitor({
+      client,
+      currentSessionID: "current",
+      now: NOW,
+    });
+
+    expect(result.metadata.ok).toBe(true);
+    expect(result.metadata.tuiNotification).toEqual({
+      ok: false,
+      error: "client.tui.showToast failed: not connected",
+    });
   });
 
   it("does not list or delete when validation fails", async () => {
@@ -45,6 +95,15 @@ describe("runSessionJanitor", () => {
     expect(result.output).toContain("Mode: validation-error");
     expect(client.session.list).not.toHaveBeenCalled();
     expect(client.session.delete).not.toHaveBeenCalled();
+    expect(client.tui?.showToast).toHaveBeenCalledWith({
+      body: {
+        title: "Session Janitor",
+        message:
+          "Run failed (validation-error); check the app log for details.",
+        variant: "error",
+        duration: 10000,
+      },
+    });
   });
 
   it("does not list or delete in delete mode when config has unknown options", async () => {
@@ -66,6 +125,15 @@ describe("runSessionJanitor", () => {
     expect(result.output).toContain("Refusing delete");
     expect(client.session.list).not.toHaveBeenCalled();
     expect(client.session.delete).not.toHaveBeenCalled();
+    expect(client.tui?.showToast).toHaveBeenCalledWith({
+      body: {
+        title: "Session Janitor",
+        message:
+          "Run failed (validation-error); check the app log for details.",
+        variant: "error",
+        duration: 10000,
+      },
+    });
   });
 
   it("loads the default project config file before listing sessions", async () => {
@@ -239,6 +307,9 @@ describe("runSessionJanitor", () => {
       app: {
         log: vi.fn(async () => ({ data: true })),
       },
+      tui: {
+        showToast: vi.fn(async () => ({ data: true })),
+      },
     } satisfies SessionJanitorClient;
 
     const result = await runSessionJanitor({
@@ -252,6 +323,14 @@ describe("runSessionJanitor", () => {
     expect(result.output).toContain("Mode: list-error");
     expect(result.output).toContain("boom");
     expect(client.session.delete).not.toHaveBeenCalled();
+    expect(client.tui.showToast).toHaveBeenCalledWith({
+      body: {
+        title: "Session Janitor",
+        message: "Run failed (delete); check the app log for details.",
+        variant: "error",
+        duration: 10000,
+      },
+    });
   });
 
   it("stops before listing when already cancelled", async () => {
@@ -763,6 +842,9 @@ function createClient(
       },
       app: {
         log: vi.fn(async () => ({ data: true })),
+      },
+      tui: {
+        showToast: vi.fn(async () => ({ data: true })),
       },
     },
   };

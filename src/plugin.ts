@@ -10,9 +10,14 @@ import {
 import { loadSessionJanitorConfigFile } from "./config-file.js";
 import type { SessionJanitorClient } from "./janitor-session-client.js";
 import { formatUnknownError } from "./janitor-session-client.js";
-import { runSessionJanitor } from "./janitor.js";
+import {
+  runSessionJanitor,
+  safeShowTuiToast,
+  shouldNotifyTui,
+} from "./janitor.js";
 
 const serviceName = "opencode-session-janitor";
+const delayedStartupToastDelayMs = 3000;
 
 type StartupLoggingResult =
   | { ok: true }
@@ -36,10 +41,12 @@ const SessionJanitorPlugin: Plugin = async function SessionJanitorPlugin(
         configFileBaseDir: input.worktree,
         trigger: "startup",
         forceDryRun: true,
+        suppressTuiToast: true,
       }),
     )
     .then((result) => {
       reportStartupResultProblems("dry-run", result);
+      scheduleDelayedStartupToast(input.client, result.metadata);
       return result;
     })
     .catch((error: unknown) => {
@@ -124,6 +131,58 @@ async function getStartupAutoDeleteConfig(input: {
   return undefined;
 }
 
+function scheduleDelayedStartupToast(
+  client: SessionJanitorClient,
+  metadata: Record<string, unknown>,
+): void {
+  if (!shouldNotifyTui(metadata)) {
+    return;
+  }
+
+  const timer = setTimeout(() => {
+    void showDelayedStartupToast(client, metadata);
+  }, delayedStartupToastDelayMs);
+  timer.unref?.();
+}
+
+async function showDelayedStartupToast(
+  client: SessionJanitorClient,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  const notification = await safeShowTuiToast(client, metadata);
+  await safeLogDelayedStartupToast(client, notification, metadata);
+}
+
+async function safeLogDelayedStartupToast(
+  client: SessionJanitorClient,
+  notification: StartupLoggingResult,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  if (!client.app?.log) {
+    return;
+  }
+
+  try {
+    await client.app.log({
+      body: {
+        service: serviceName,
+        level: notification.ok ? "info" : "warn",
+        message: notification.ok
+          ? "Session janitor delayed TUI toast completed"
+          : "Session janitor delayed TUI toast failed",
+        extra: {
+          trigger: "startup",
+          mode: metadata.mode,
+          candidateCount: metadata.candidateCount,
+          tuiNotification: notification,
+        },
+      },
+    });
+  } catch {
+    // The delayed toast is diagnostic only; logging failures must not affect startup.
+  }
+}
+
 function matchesForcedDryRunConfig(
   dryRunConfig: unknown,
   autoDeleteConfig: ResolvedSessionJanitorConfig,
@@ -140,7 +199,8 @@ function matchesForcedDryRunConfig(
     config.excludeCurrentSession === autoDeleteConfig.excludeCurrentSession &&
     config.maxDeleteCount === autoDeleteConfig.maxDeleteCount &&
     config.trigger === autoDeleteConfig.trigger &&
-    config.allowAutoDelete === autoDeleteConfig.allowAutoDelete
+    config.allowAutoDelete === autoDeleteConfig.allowAutoDelete &&
+    config.notifyTui === autoDeleteConfig.notifyTui
   );
 }
 

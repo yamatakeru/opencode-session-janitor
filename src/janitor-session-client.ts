@@ -13,6 +13,7 @@ type ResponseFields<T> =
 type MaybeResponseFields<T> = T | ResponseFields<T>;
 
 export type LogLevel = "debug" | "info" | "error" | "warn";
+export type TuiToastVariant = "info" | "success" | "warning" | "error";
 
 export type SessionJanitorClient = {
   session: {
@@ -30,6 +31,16 @@ export type SessionJanitorClient = {
         extra?: Record<string, unknown>;
       };
     }): Promise<MaybeResponseFields<boolean>>;
+  };
+  tui?: {
+    showToast(input: {
+      body: {
+        title?: string;
+        message: string;
+        variant: TuiToastVariant;
+        duration?: number;
+      };
+    }): Promise<unknown>;
   };
 };
 

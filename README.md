@@ -46,6 +46,10 @@ When OpenCode loads the plugin, it runs one startup dry-run evaluation. The
 summary is written through OpenCode's app log with candidate counts, skipped
 counts, warnings, and config metadata.
 
+When `notifyTui` is enabled, the plugin also attempts a short best-effort TUI
+toast summary. Toast failures are ignored because the TUI may not be connected
+yet; the app log remains the authoritative record.
+
 If auto delete is explicitly enabled, the plugin waits until it observes a
 session ID from an OpenCode session event, then performs at most one startup
 auto-delete run. This preserves current-session protection. Agent-callable
@@ -95,6 +99,7 @@ Set `configFile: false` to disable dedicated config file loading.
 | `maxDeleteCount`        | `10`      | Maximum sessions deleted in one run, or `unlimited`. |
 | `trigger`               | `startup` | Hook-driven trigger to use in a supported stage.     |
 | `allowAutoDelete`       | `false`   | Required safety gate for startup auto delete.        |
+| `notifyTui`             | `true`    | Show a best-effort TUI toast summary when available. |
 
 Unknown options are reported as warnings. In delete mode, warnings block the run
 so a typo cannot silently delete sessions with unintended defaults.

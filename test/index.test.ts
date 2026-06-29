@@ -38,6 +38,9 @@ describe("SessionJanitorPlugin", () => {
       app: {
         log: vi.fn(async () => ({ data: true })),
       },
+      tui: {
+        showToast: vi.fn(async () => ({ data: true })),
+      },
     };
 
     vi.useFakeTimers();
@@ -55,6 +58,7 @@ describe("SessionJanitorPlugin", () => {
 
       expect(client.session.list).toHaveBeenCalledOnce();
       expect(client.session.delete).not.toHaveBeenCalled();
+      expect(client.tui.showToast).not.toHaveBeenCalled();
       expect(client.app.log).toHaveBeenCalledWith(
         expect.objectContaining({
           body: expect.objectContaining({
@@ -67,6 +71,27 @@ describe("SessionJanitorPlugin", () => {
               warnings: expect.arrayContaining([
                 "dryRun:false ignored because this run was forced to dry-run.",
               ]),
+              tuiNotification: {
+                ok: false,
+                error: "TUI toast suppressed",
+              },
+            }),
+          }),
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(client.tui.showToast).toHaveBeenCalledOnce();
+      expect(client.app.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            level: "info",
+            message: "Session janitor delayed TUI toast completed",
+            extra: expect.objectContaining({
+              trigger: "startup",
+              mode: "dry-run",
+              candidateCount: 1,
+              tuiNotification: { ok: true },
             }),
           }),
         }),

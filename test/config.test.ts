@@ -20,6 +20,7 @@ describe("resolveConfig", () => {
     expect(result.config.includeShared).toBe(false);
     expect(result.config.excludeCurrentSession).toBe(true);
     expect(result.config.maxDeleteCount).toBe(10);
+    expect(result.config.notifyTui).toBe(true);
   });
 
   it("uses plugin options as the highest-precedence runtime policy source", () => {
@@ -84,6 +85,7 @@ describe("resolveConfig", () => {
       maxDeleteCount: Number.MAX_SAFE_INTEGER + 1,
       trigger: "never",
       allowAutoDelete: "yes",
+      notifyTui: "sometimes",
     });
 
     expect(result.ok).toBe(false);
@@ -98,6 +100,7 @@ describe("resolveConfig", () => {
       'maxDeleteCount must be a positive integer or "unlimited"',
       "trigger must be one of startup or sessionIdle",
       "allowAutoDelete must be boolean",
+      "notifyTui must be boolean",
     ]);
   });
 
