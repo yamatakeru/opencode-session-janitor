@@ -3,15 +3,21 @@ import type { Event } from "@opencode-ai/sdk";
 
 import {
   getCleanupOptions,
-  resolveConfigFromSources,
+  resolveConfigFromOptionSources,
   type ResolvedSessionJanitorConfig,
   type SessionJanitorPluginOptions,
 } from "./config.js";
 import { loadSessionJanitorConfigFile } from "./config-file.js";
 import { safeShowTuiToast, shouldNotifyTui } from "./janitor-notifier.js";
 import { runSessionJanitor } from "./janitor.js";
-import type { SessionJanitorClient } from "./janitor-session-client.js";
-import { formatUnknownError } from "./janitor-session-client.js";
+import type {
+  LogLevel,
+  SessionJanitorClient,
+} from "./janitor-session-client.js";
+import {
+  formatUnknownError,
+  unwrapResponse,
+} from "./janitor-session-client.js";
 
 const serviceName = "opencode-session-janitor";
 const delayedStartupToastDelayMs = 3000;
@@ -23,6 +29,10 @@ type StartupLoggingResult =
       error: string;
     };
 type StartupRunKind = "dry-run" | "auto delete";
+type StartupAutoDeleteConfigResult =
+  | { kind: "ready"; config: ResolvedSessionJanitorConfig }
+  | { kind: "not-enabled" }
+  | { kind: "blocked"; errors: string[]; warnings: string[] };
 
 const SessionJanitorPlugin: Plugin = async function SessionJanitorPlugin(
   input,
@@ -69,24 +79,52 @@ const SessionJanitorPlugin: Plugin = async function SessionJanitorPlugin(
       if (dryRunResult?.metadata.ok !== true) {
         return;
       }
+      const dryRunLogging = dryRunResult.metadata.logging;
+      if (isStartupLoggingFailure(dryRunLogging)) {
+        await reportStartupAutoDeleteBlocked(input.client, {
+          kind: "blocked",
+          errors: [
+            `Refusing startup auto delete because the startup dry-run could not be logged: ${dryRunLogging.error}`,
+          ],
+          warnings: [],
+        });
+        return;
+      }
 
       const autoDeleteConfig = await getStartupAutoDeleteConfig({
         pluginOptions,
         configFileBaseDir: input.worktree,
       });
+      if (autoDeleteConfig.kind === "blocked") {
+        await reportStartupAutoDeleteBlocked(input.client, autoDeleteConfig);
+        return;
+      }
+      if (autoDeleteConfig.kind !== "ready") {
+        return;
+      }
       if (
-        autoDeleteConfig === undefined ||
         !matchesForcedDryRunConfig(
           dryRunResult.metadata.config,
-          autoDeleteConfig,
+          autoDeleteConfig.config,
         )
       ) {
+        await reportStartupAutoDeleteBlocked(input.client, {
+          kind: "blocked",
+          errors: [
+            "Refusing startup auto delete because config changed after the startup dry-run.",
+          ],
+          warnings: [],
+        });
         return;
       }
 
       void runSessionJanitor({
         client: input.client,
-        pluginOptions: { ...autoDeleteConfig, configFile: false },
+        pluginOptions: {
+          ...autoDeleteConfig.config,
+          globalConfigFile: false,
+          projectConfigFile: false,
+        },
         configFileBaseDir: input.worktree,
         currentSessionID,
         trigger: "startup",
@@ -102,30 +140,85 @@ const SessionJanitorPlugin: Plugin = async function SessionJanitorPlugin(
 async function getStartupAutoDeleteConfig(input: {
   pluginOptions: SessionJanitorPluginOptions | undefined;
   configFileBaseDir: string;
-}): Promise<ResolvedSessionJanitorConfig | undefined> {
+}): Promise<StartupAutoDeleteConfigResult> {
   const configFile = await loadSessionJanitorConfigFile({
     baseDir: input.configFileBaseDir,
     pluginOptions: input.pluginOptions,
   });
   if (configFile.errors.length > 0) {
-    return undefined;
+    return {
+      kind: "blocked",
+      errors: configFile.errors,
+      warnings: configFile.warnings,
+    };
   }
 
-  const validation = resolveConfigFromSources(
-    configFile.options,
+  const validation = resolveConfigFromOptionSources(
+    configFile.optionSources,
     getCleanupOptions(input.pluginOptions),
   );
+  if (!validation.ok) {
+    return {
+      kind: "blocked",
+      errors: validation.errors,
+      warnings: [...configFile.warnings, ...validation.warnings],
+    };
+  }
+
+  const warnings = [...configFile.warnings, ...validation.warnings];
+
+  if (validation.config.dryRun === false && warnings.length > 0) {
+    return {
+      kind: "blocked",
+      errors: warnings.map(
+        (warning) =>
+          `Refusing delete because configuration was not fully recognized: ${warning}`,
+      ),
+      warnings,
+    };
+  }
+
+  if (validation.config.dryRun === false) {
+    const gateErrors = getStartupAutoDeleteGateErrors(validation.config);
+    if (gateErrors.length > 0) {
+      return { kind: "blocked", errors: gateErrors, warnings: [] };
+    }
+  }
+
   if (
-    validation.ok &&
-    validation.warnings.length === 0 &&
+    warnings.length === 0 &&
     validation.config.trigger === "startup" &&
     validation.config.dryRun === false &&
     validation.config.allowAutoDelete === true
   ) {
-    return validation.config;
+    return { kind: "ready", config: validation.config };
   }
 
-  return undefined;
+  return { kind: "not-enabled" };
+}
+
+function getStartupAutoDeleteGateErrors(
+  config: ResolvedSessionJanitorConfig,
+): string[] {
+  const errors: string[] = [];
+
+  if (config.trigger !== "startup") {
+    errors.push(
+      "Refusing startup auto delete because trigger must be startup.",
+    );
+  }
+  if (!config.allowAutoDelete) {
+    errors.push(
+      "Refusing startup auto delete because allowAutoDelete:true is required.",
+    );
+  }
+  if (!config.excludeCurrentSession) {
+    errors.push(
+      "Refusing startup auto delete because excludeCurrentSession:true is required.",
+    );
+  }
+
+  return errors;
 }
 
 function scheduleDelayedStartupToast(
@@ -137,7 +230,11 @@ function scheduleDelayedStartupToast(
   }
 
   const timer = setTimeout(() => {
-    void showDelayedStartupToast(client, metadata);
+    void showDelayedStartupToast(client, metadata).catch((error: unknown) => {
+      console.warn(
+        `Session janitor delayed TUI toast failed unexpectedly: ${formatUnknownError(error)}`,
+      );
+    });
   }, delayedStartupToastDelayMs);
   timer.unref?.();
 }
@@ -156,27 +253,32 @@ async function safeLogDelayedStartupToast(
   metadata: Record<string, unknown>,
 ): Promise<void> {
   if (!client.app?.log) {
+    if (!notification.ok) {
+      console.warn(
+        `Session janitor delayed TUI toast failed: ${notification.error}`,
+      );
+    }
     return;
   }
 
   try {
-    await client.app.log({
-      body: {
-        service: serviceName,
-        level: notification.ok ? "info" : "warn",
-        message: notification.ok
-          ? "Session janitor delayed TUI toast completed"
-          : "Session janitor delayed TUI toast failed",
-        extra: {
-          trigger: "startup",
-          mode: metadata.mode,
-          candidateCount: metadata.candidateCount,
-          tuiNotification: notification,
-        },
+    await logToApp(
+      client,
+      notification.ok ? "info" : "warn",
+      notification.ok
+        ? "Session janitor delayed TUI toast completed"
+        : "Session janitor delayed TUI toast failed",
+      {
+        trigger: "startup",
+        mode: metadata.mode,
+        candidateCount: metadata.candidateCount,
+        tuiNotification: notification,
       },
-    });
-  } catch {
-    // The delayed toast is diagnostic only; logging failures must not affect startup.
+    );
+  } catch (error) {
+    console.warn(
+      `Session janitor delayed TUI toast log failed: ${formatUnknownError(error)}`,
+    );
   }
 }
 
@@ -240,6 +342,59 @@ function reportStartupResultProblems(
   }
 }
 
+async function reportStartupAutoDeleteBlocked(
+  client: SessionJanitorClient,
+  result: Extract<StartupAutoDeleteConfigResult, { kind: "blocked" }>,
+): Promise<void> {
+  const level = result.errors.length > 0 ? "error" : "warn";
+  const message = "Session janitor startup auto delete blocked";
+
+  if (client.app?.log) {
+    try {
+      await logToApp(client, level, message, {
+        trigger: "startup",
+        errors: result.errors,
+        warnings: result.warnings,
+      });
+      return;
+    } catch (error) {
+      console.warn(
+        `${message}: ${formatMessages(result)}\n` +
+          `Also failed to log startup auto delete block: ${formatUnknownError(error)}`,
+      );
+      return;
+    }
+  }
+
+  console.warn(`${message}: ${formatMessages(result)}`);
+}
+
+async function logToApp(
+  client: SessionJanitorClient,
+  level: LogLevel,
+  message: string,
+  extra: Record<string, unknown>,
+): Promise<void> {
+  if (!client.app?.log) {
+    throw new Error("client.app.log is unavailable");
+  }
+
+  const logged = unwrapResponse(
+    await client.app.log({
+      body: {
+        service: serviceName,
+        level,
+        message,
+        extra,
+      },
+    }),
+    "client.app.log",
+  );
+  if (logged !== true) {
+    throw new Error("client.app.log returned false");
+  }
+}
+
 async function reportStartupError(
   kind: StartupRunKind,
   client: SessionJanitorClient,
@@ -248,19 +403,20 @@ async function reportStartupError(
   const formatted = formatUnknownError(error);
   if (client.app?.log) {
     try {
-      await client.app.log({
-        body: {
-          service: serviceName,
-          level: "error",
-          message: `Session janitor startup ${kind} failed unexpectedly`,
-          extra: { trigger: "startup", error: formatted },
+      await logToApp(
+        client,
+        "error",
+        `Session janitor startup ${kind} failed unexpectedly`,
+        {
+          trigger: "startup",
+          error: formatted,
         },
-      });
+      );
       return;
-    } catch (logError) {
+    } catch (error) {
       console.warn(
         `Session janitor startup ${kind} failed unexpectedly: ${formatted}\n` +
-          `Also failed to log startup ${kind} error: ${formatUnknownError(logError)}`,
+          `Also failed to log startup ${kind} error: ${formatUnknownError(error)}`,
       );
       return;
     }
@@ -269,6 +425,13 @@ async function reportStartupError(
   console.warn(
     `Session janitor startup ${kind} failed unexpectedly: ${formatted}`,
   );
+}
+
+function formatMessages(result: {
+  errors: string[];
+  warnings: string[];
+}): string {
+  return [...result.errors, ...result.warnings].join("\n");
 }
 
 function isStartupLoggingFailure(

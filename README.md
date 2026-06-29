@@ -23,7 +23,9 @@ Add the plugin to your OpenCode config:
 }
 ```
 
-Then create `.opencode/session-janitor.json` in the project:
+Then create either a user-wide config file at
+`~/.config/opencode/session-janitor.json` or a project config file at
+`.opencode/session-janitor.json`:
 
 ```json
 {
@@ -33,9 +35,8 @@ Then create `.opencode/session-janitor.json` in the project:
 }
 ```
 
-OpenCode uses the singular top-level `plugin` key. The dedicated
-`.opencode/session-janitor.json` file keeps janitor settings separate from the
-OpenCode config schema.
+OpenCode uses the singular top-level `plugin` key. The dedicated janitor config
+files keep cleanup settings separate from the OpenCode config schema.
 
 The package root is the OpenCode plugin entrypoint. Programmatic APIs are
 available from the `opencode-session-janitor/api` subpath.
@@ -57,7 +58,7 @@ deletion is not available.
 
 ## Configuration
 
-Recommended project config file:
+Recommended config file:
 
 ```json
 {
@@ -69,10 +70,13 @@ Recommended project config file:
 Configuration precedence is:
 
 1. Built-in safe defaults.
-2. `.opencode/session-janitor.json`.
-3. OpenCode plugin tuple options.
+2. `$XDG_CONFIG_HOME/opencode/session-janitor.json`, or
+   `~/.config/opencode/session-janitor.json` when `XDG_CONFIG_HOME` is unset.
+3. `.opencode/session-janitor.json` in the current OpenCode worktree.
+4. OpenCode plugin tuple options.
 
-To use a different config file, pass `configFile` as a plugin option:
+To use different config file paths, pass `globalConfigFile` or
+`projectConfigFile` as plugin options:
 
 ```json
 {
@@ -81,14 +85,17 @@ To use a different config file, pass `configFile` as a plugin option:
     [
       "opencode-session-janitor",
       {
-        "configFile": ".opencode/session-janitor.json"
+        "globalConfigFile": "/Users/you/.config/opencode/session-janitor.json",
+        "projectConfigFile": ".opencode/session-janitor.json"
       }
     ]
   ]
 }
 ```
 
-Set `configFile: false` to disable dedicated config file loading.
+Set `globalConfigFile: false` or `projectConfigFile: false` to disable either
+file layer. `globalConfigFile` paths must be absolute or start with `~/`.
+Relative `projectConfigFile` paths are resolved from the OpenCode worktree.
 
 | Option                  | Default   | Description                                          |
 | ----------------------- | --------- | ---------------------------------------------------- |
@@ -104,14 +111,18 @@ Set `configFile: false` to disable dedicated config file loading.
 Unknown options are reported as warnings. In delete mode, warnings block the run
 so a typo cannot silently delete sessions with unintended defaults.
 
-If the default `.opencode/session-janitor.json` file is missing, it is ignored.
-If an explicit `configFile` path is missing or invalid, the run fails before
-listing or deleting sessions.
+Missing default global or project config files are ignored. Existing config
+files that are invalid, unreadable, or not JSON objects fail before listing or
+deleting sessions. Missing explicit config file paths also fail before listing
+or deleting sessions.
 
 ## Safety
 
 - Startup auto delete requires `dryRun: false` and `allowAutoDelete: true`.
 - First run with `dryRun: true` is strongly recommended before enabling delete.
+- The global config file is user-wide policy. Setting `dryRun: false` and
+  `allowAutoDelete: true` there can enable startup auto delete in every project
+  that loads this plugin unless a higher-precedence source overrides it.
 - Shared sessions and the current session are protected by default.
 - Setting `includeShared: true` allows startup auto delete to delete old shared
   sessions, which may invalidate shared URLs.
@@ -167,8 +178,8 @@ project or using a small auto-discovered wrapper instead of pointing config at a
 export { server } from "opencode-session-janitor";
 ```
 
-Restart OpenCode after changing plugin configuration, changing
-`.opencode/session-janitor.json`, or rebuilding the package.
+Restart OpenCode after changing plugin configuration, changing janitor config
+files, or rebuilding the package.
 
 ## Compatibility
 

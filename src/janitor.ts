@@ -1,6 +1,6 @@
 import type { Session } from "@opencode-ai/sdk";
 
-import { getCleanupOptions, resolveConfigFromSources } from "./config.js";
+import { getCleanupOptions, resolveConfigFromOptionSources } from "./config.js";
 import type {
   ResolvedSessionJanitorConfig,
   SessionJanitorConfig,
@@ -101,27 +101,34 @@ export async function runSessionJanitor({
       ? {
           ok: false as const,
           errors: configFile.errors,
-          warnings: [],
+          warnings: configFile.warnings,
         }
-      : resolveConfigFromSources(configFile.options, pluginCleanupOptions);
+      : resolveConfigFromOptionSources(
+          configFile.optionSources,
+          pluginCleanupOptions,
+        );
+  const validationWarnings =
+    configFile.errors.length > 0
+      ? validation.warnings
+      : [...configFile.warnings, ...validation.warnings];
   if (!validation.ok) {
     const metadata = {
       ok: false,
       trigger,
       mode: "validation-error",
       errors: validation.errors,
-      warnings: validation.warnings,
+      warnings: validationWarnings,
       config: invalidConfigNotificationConfig,
       configFile: configFileMetadata,
     };
     return finalizeRun("warn", "Session janitor validation failed", {
       title: "Session janitor validation failed",
-      output: renderValidationError(validation.errors, validation.warnings),
+      output: renderValidationError(validation.errors, validationWarnings),
       metadata,
     });
   }
 
-  const warnings = [...validation.warnings];
+  const warnings = validationWarnings;
   const config = forceDryRun
     ? applyForcedDryRun(validation.config, warnings)
     : applyAutoDeleteGate(validation.config, warnings, trigger);
@@ -468,6 +475,8 @@ function buildConfigFileMetadata(
   return {
     path: configFile.path,
     loaded: configFile.loaded,
+    files: configFile.files,
+    warnings: configFile.warnings,
     errors: configFile.errors,
   };
 }

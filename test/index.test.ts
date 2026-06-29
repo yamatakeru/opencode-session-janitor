@@ -1,7 +1,31 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { server as SessionJanitorPlugin } from "../src/index.js";
 import { daysAgo, makeSession, NOW } from "./helpers.js";
+
+const disabledConfigFiles = {
+  globalConfigFile: false,
+  projectConfigFile: false,
+};
+const tempConfigHomes: string[] = [];
+
+beforeEach(async () => {
+  const configHome = await mkdtemp(join(tmpdir(), "session-janitor-xdg-"));
+  tempConfigHomes.push(configHome);
+  vi.stubEnv("XDG_CONFIG_HOME", configHome);
+});
+
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await Promise.all(
+    tempConfigHomes
+      .splice(0)
+      .map((dir) => rm(dir, { recursive: true, force: true })),
+  );
+});
 
 describe("SessionJanitorPlugin", () => {
   it("keeps the package root plugin-only", async () => {
@@ -20,9 +44,11 @@ describe("SessionJanitorPlugin", () => {
       expect.objectContaining({
         calculateAgeDays: expect.any(Function),
         defaultSessionJanitorConfig: expect.any(Object),
+        defaultGlobalSessionJanitorConfigFile: expect.any(String),
         defaultSessionJanitorConfigFile: expect.any(String),
         evaluateSessions: expect.any(Function),
         resolveConfig: expect.any(Function),
+        resolveConfigFromOptionSources: expect.any(Function),
         resolveConfigFromSources: expect.any(Function),
         runSessionJanitor: expect.any(Function),
       }),
@@ -48,7 +74,7 @@ describe("SessionJanitorPlugin", () => {
 
     try {
       const hooks = await SessionJanitorPlugin(createPluginInput(client), {
-        configFile: false,
+        ...disabledConfigFiles,
         dryRun: false,
       });
 
@@ -117,7 +143,7 @@ describe("SessionJanitorPlugin", () => {
     };
 
     const hooks = await SessionJanitorPlugin(createPluginInput(client), {
-      configFile: false,
+      ...disabledConfigFiles,
     });
 
     expect(hooks).not.toHaveProperty("tool");
@@ -144,7 +170,7 @@ describe("SessionJanitorPlugin", () => {
 
     try {
       const hooks = await SessionJanitorPlugin(createPluginInput(client), {
-        configFile: false,
+        ...disabledConfigFiles,
         dryRun: false,
         allowAutoDelete: true,
       });
@@ -187,6 +213,40 @@ describe("SessionJanitorPlugin", () => {
     }
   });
 
+  it("uses global config for startup auto delete", async () => {
+    await writeGlobalConfig(
+      JSON.stringify({
+        dryRun: false,
+        allowAutoDelete: true,
+      }),
+    );
+    const client = {
+      session: {
+        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi.fn(async () => ({ data: true })),
+      },
+    };
+
+    const hooks = await SessionJanitorPlugin(createPluginInput(client));
+
+    await hooks.event?.({
+      event: {
+        type: "session.idle",
+        properties: { sessionID: "current" },
+      } as never,
+    });
+
+    await vi.waitFor(() =>
+      expect(client.session.delete).toHaveBeenCalledOnce(),
+    );
+    expect(client.session.delete).toHaveBeenCalledWith({
+      path: { id: "old" },
+    });
+  });
+
   it("runs startup auto delete for shared sessions when includeShared is enabled", async () => {
     const client = {
       session: {
@@ -209,7 +269,7 @@ describe("SessionJanitorPlugin", () => {
 
     try {
       const hooks = await SessionJanitorPlugin(createPluginInput(client), {
-        configFile: false,
+        ...disabledConfigFiles,
         dryRun: false,
         allowAutoDelete: true,
         includeShared: true,
@@ -258,7 +318,7 @@ describe("SessionJanitorPlugin", () => {
     };
 
     const hooks = await SessionJanitorPlugin(createPluginInput(client), {
-      configFile: false,
+      ...disabledConfigFiles,
       dryRun: false,
       allowAutoDelete: true,
     });
@@ -294,7 +354,7 @@ describe("SessionJanitorPlugin", () => {
 
     try {
       const hooks = await SessionJanitorPlugin(createPluginInput(client), {
-        configFile: false,
+        ...disabledConfigFiles,
         dryRun: false,
         allowAutoDelete: true,
       });
@@ -325,7 +385,7 @@ describe("SessionJanitorPlugin", () => {
       },
     };
     const pluginOptions = {
-      configFile: false,
+      ...disabledConfigFiles,
       dryRun: false,
       allowAutoDelete: true,
       retentionDays: 30,
@@ -348,6 +408,100 @@ describe("SessionJanitorPlugin", () => {
     expect(client.session.delete).not.toHaveBeenCalled();
   });
 
+  it("logs when startup auto delete is blocked after the startup dry-run", async () => {
+    const client = {
+      session: {
+        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi.fn(async () => ({ data: true })),
+      },
+    };
+    const pluginOptions: Record<string, unknown> = {
+      ...disabledConfigFiles,
+      dryRun: false,
+      allowAutoDelete: true,
+    };
+
+    const hooks = await SessionJanitorPlugin(
+      createPluginInput(client),
+      pluginOptions,
+    );
+    await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
+
+    pluginOptions.retentionDay = 365;
+    await hooks.event?.({
+      event: {
+        type: "session.idle",
+        properties: { sessionID: "current" },
+      } as never,
+    });
+
+    expect(client.session.delete).not.toHaveBeenCalled();
+    expect(client.app.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          level: "error",
+          message: "Session janitor startup auto delete blocked",
+          extra: expect.objectContaining({
+            errors: expect.arrayContaining([
+              expect.stringContaining(
+                "Unknown plugin options key ignored: retentionDay",
+              ),
+            ]),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("warns when startup auto delete blocked logging fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const client = {
+      session: {
+        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi
+          .fn()
+          .mockResolvedValueOnce({ data: true })
+          .mockResolvedValueOnce({ error: { message: "log failed" } }),
+      },
+    };
+    const pluginOptions: Record<string, unknown> = {
+      ...disabledConfigFiles,
+      dryRun: false,
+      allowAutoDelete: true,
+    };
+
+    try {
+      const hooks = await SessionJanitorPlugin(
+        createPluginInput(client),
+        pluginOptions,
+      );
+      await vi.waitFor(() => expect(client.app.log).toHaveBeenCalledOnce());
+
+      pluginOptions.retentionDay = 365;
+      await hooks.event?.({
+        event: {
+          type: "session.idle",
+          properties: { sessionID: "current" },
+        } as never,
+      });
+
+      expect(client.session.delete).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Also failed to log startup auto delete block: Error: client.app.log failed: log failed",
+        ),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("does not treat session info events as current-session observations", async () => {
     const client = {
       session: {
@@ -360,7 +514,7 @@ describe("SessionJanitorPlugin", () => {
     };
 
     const hooks = await SessionJanitorPlugin(createPluginInput(client), {
-      configFile: false,
+      ...disabledConfigFiles,
       dryRun: false,
       allowAutoDelete: true,
     });
@@ -388,7 +542,7 @@ describe("SessionJanitorPlugin", () => {
     };
 
     const hooks = await SessionJanitorPlugin(createPluginInput(client), {
-      configFile: false,
+      ...disabledConfigFiles,
       dryRun: false,
     });
 
@@ -414,7 +568,7 @@ describe("SessionJanitorPlugin", () => {
 
     try {
       await expect(
-        SessionJanitorPlugin(createPluginInput(client), { configFile: false }),
+        SessionJanitorPlugin(createPluginInput(client), disabledConfigFiles),
       ).resolves.toEqual({ event: expect.any(Function) });
       await vi.waitFor(() => expect(warn).toHaveBeenCalled());
 
@@ -423,6 +577,41 @@ describe("SessionJanitorPlugin", () => {
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining(
           "Session janitor startup dry-run could not be logged",
+        ),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not auto delete when the startup dry-run could not be logged", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const client = {
+      session: {
+        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+    };
+
+    try {
+      const hooks = await SessionJanitorPlugin(createPluginInput(client), {
+        ...disabledConfigFiles,
+        dryRun: false,
+        allowAutoDelete: true,
+      });
+      await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+
+      await hooks.event?.({
+        event: {
+          type: "session.idle",
+          properties: { sessionID: "current" },
+        } as never,
+      });
+
+      expect(client.session.delete).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Refusing startup auto delete because the startup dry-run could not be logged",
         ),
       );
     } finally {
@@ -444,7 +633,7 @@ describe("SessionJanitorPlugin", () => {
 
     try {
       await expect(
-        SessionJanitorPlugin(createPluginInput(client), { configFile: false }),
+        SessionJanitorPlugin(createPluginInput(client), disabledConfigFiles),
       ).resolves.toEqual({ event: expect.any(Function) });
       await vi.waitFor(() => expect(client.app.log).toHaveBeenCalled());
 
@@ -478,4 +667,15 @@ function createPluginInput(client: unknown): never {
     serverUrl: new URL("http://localhost"),
     $: vi.fn(),
   } as never;
+}
+
+async function writeGlobalConfig(content: string): Promise<void> {
+  const configHome = process.env.XDG_CONFIG_HOME;
+  if (!configHome) {
+    throw new Error("XDG_CONFIG_HOME must be set for this test");
+  }
+
+  const opencodeDir = join(configHome, "opencode");
+  await mkdir(opencodeDir, { recursive: true });
+  await writeFile(join(opencodeDir, "session-janitor.json"), content, "utf8");
 }

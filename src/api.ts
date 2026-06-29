@@ -7,10 +7,19 @@ export type {
 export {
   defaultSessionJanitorConfig,
   resolveConfig,
+  resolveConfigFromOptionSources,
   resolveConfigFromSources,
 } from "./config.js";
-export { defaultSessionJanitorConfigFile } from "./config-file.js";
-export type { ConfigFileLoadResult } from "./config-file.js";
+export {
+  defaultGlobalSessionJanitorConfigFile,
+  defaultSessionJanitorConfigFile,
+} from "./config-file.js";
+export type {
+  ConfigFileKind,
+  ConfigFileLoadResult,
+  ConfigFileOptionSource,
+  ConfigFileSourceResult,
+} from "./config-file.js";
 export { calculateAgeDays, evaluateSessions } from "./evaluate.js";
 export type {
   EvaluationResult,

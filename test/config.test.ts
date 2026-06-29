@@ -4,6 +4,7 @@ import {
   defaultSessionJanitorConfig,
   getCleanupOptions,
   resolveConfig,
+  resolveConfigFromOptionSources,
   resolveConfigFromSources,
 } from "../src/config.js";
 
@@ -50,7 +51,24 @@ describe("resolveConfig", () => {
     expect(result.config.maxDeleteCount).toBe(20);
   });
 
-  it("does not treat configFile as a cleanup option", () => {
+  it("does not treat config path options as cleanup options", () => {
+    const result = resolveConfig(
+      getCleanupOptions({
+        retentionDays: 14,
+        globalConfigFile: false,
+        projectConfigFile: ".opencode/session-janitor.json",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("expected config to be valid");
+    }
+    expect(result.config.retentionDays).toBe(14);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("treats the retired configFile option as unknown", () => {
     const result = resolveConfig(
       getCleanupOptions({
         retentionDays: 14,
@@ -63,7 +81,9 @@ describe("resolveConfig", () => {
       throw new Error("expected config to be valid");
     }
     expect(result.config.retentionDays).toBe(14);
-    expect(result.warnings).toEqual([]);
+    expect(result.warnings).toEqual([
+      "Unknown plugin options key ignored: configFile",
+    ]);
   });
 
   it("keeps invalid non-object cleanup options invalid", () => {
@@ -146,5 +166,45 @@ describe("resolveConfig", () => {
     }
     expect(result.config.retentionDays).toBe(14);
     expect(result.warnings).toEqual(["Unknown config file key ignored: extra"]);
+  });
+
+  it("merges labeled config file sources in order", () => {
+    const result = resolveConfigFromOptionSources(
+      [
+        {
+          label: "global config file",
+          options: { retentionDays: 90, maxDeleteCount: 20 },
+        },
+        {
+          label: "project config file",
+          options: { retentionDays: 14, includeShared: true },
+        },
+      ],
+      { retentionDays: 7 },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("expected config to be valid");
+    }
+    expect(result.config.retentionDays).toBe(7);
+    expect(result.config.includeShared).toBe(true);
+    expect(result.config.maxDeleteCount).toBe(20);
+  });
+
+  it("labels unknown keys by config file source", () => {
+    const result = resolveConfigFromOptionSources([
+      { label: "global config file", options: { globalTypo: true } },
+      { label: "project config file", options: { projectTypo: true } },
+    ]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("expected config to be valid");
+    }
+    expect(result.warnings).toEqual([
+      "Unknown global config file key ignored: globalTypo",
+      "Unknown project config file key ignored: projectTypo",
+    ]);
   });
 });

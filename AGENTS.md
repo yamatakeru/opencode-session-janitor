@@ -45,6 +45,8 @@ Preserve these behaviors:
 - Config validation failures must prevent deletion.
 - Unknown option warnings must block delete mode.
 - If the current session ID is unavailable, delete mode must fail closed.
+- User-wide config is read before project config; project config and plugin
+  options may override it.
 - Do not directly edit OpenCode database or storage files.
 - Use OpenCode SDK/API methods for listing and deleting sessions.
 
@@ -62,6 +64,7 @@ behavior against this API shape.
 
 - `src/index.ts`: plugin entrypoint.
 - `src/config.ts`: config defaults, merging, validation, and unknown options.
+- `src/config-file.ts`: user-wide and project config file discovery/loading.
 - `src/evaluate.ts`: session eligibility, age calculation, and skip reasons.
 - `src/janitor.ts`: list/evaluate/delete orchestration, logging, output, and cancellation.
 - `test/`: Vitest tests for config, evaluation, plugin registration, and janitor behavior.

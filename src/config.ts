@@ -12,7 +12,8 @@ export type SessionJanitorConfig = {
 };
 
 export type SessionJanitorPluginOptions = SessionJanitorConfig & {
-  configFile?: string | false;
+  globalConfigFile?: string | false;
+  projectConfigFile?: string | false;
 };
 
 export type ResolvedSessionJanitorConfig = Required<SessionJanitorConfig>;
@@ -62,11 +63,28 @@ export function resolveConfigFromSources(
   configFileOptions?: unknown,
   pluginOptions?: unknown,
 ): ConfigValidationResult {
+  return resolveConfigFromOptionSources(
+    [{ label: "config file", options: configFileOptions }],
+    pluginOptions,
+  );
+}
+
+export type ConfigOptionSource = {
+  label: string;
+  options?: unknown;
+};
+
+export function resolveConfigFromOptionSources(
+  configFileSources: ConfigOptionSource[],
+  pluginOptions?: unknown,
+): ConfigValidationResult {
   const merged: Record<string, unknown> = { ...defaultSessionJanitorConfig };
   const warnings: string[] = [];
   const errors: string[] = [];
 
-  applyOptions(merged, warnings, errors, "config file", configFileOptions);
+  for (const source of configFileSources) {
+    applyOptions(merged, warnings, errors, source.label, source.options);
+  }
   applyOptions(merged, warnings, errors, "plugin options", pluginOptions);
 
   if (!isPositiveInteger(merged.retentionDays)) {
@@ -124,7 +142,11 @@ export function getCleanupOptions(value: unknown): unknown {
     return value;
   }
 
-  const { configFile: _configFile, ...cleanupOptions } = value;
+  const {
+    globalConfigFile: _globalConfigFile,
+    projectConfigFile: _projectConfigFile,
+    ...cleanupOptions
+  } = value;
   return cleanupOptions;
 }
 

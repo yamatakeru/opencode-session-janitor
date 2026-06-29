@@ -2,11 +2,28 @@ import type { Session } from "@opencode-ai/sdk";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runSessionJanitor } from "../src/janitor.js";
 import type { SessionJanitorClient } from "../src/janitor.js";
 import { daysAgo, makeSession, NOW } from "./helpers.js";
+
+const tempConfigHomes: string[] = [];
+
+beforeEach(async () => {
+  const configHome = await mkdtemp(join(tmpdir(), "session-janitor-xdg-"));
+  tempConfigHomes.push(configHome);
+  vi.stubEnv("XDG_CONFIG_HOME", configHome);
+});
+
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await Promise.all(
+    tempConfigHomes
+      .splice(0)
+      .map((dir) => rm(dir, { recursive: true, force: true })),
+  );
+});
 
 describe("runSessionJanitor", () => {
   it("returns an empty dry-run summary", async () => {
@@ -136,7 +153,53 @@ describe("runSessionJanitor", () => {
     });
   });
 
-  it("loads the default project config file before listing sessions", async () => {
+  it("loads the default global config file before listing sessions", async () => {
+    await writeGlobalConfig(JSON.stringify({ retentionDays: 1 }));
+    const { client } = createClient([makeSession("old", daysAgo(2))]);
+
+    const result = await runSessionJanitor({
+      client,
+      currentSessionID: "current",
+      trigger: "sessionIdle",
+      now: NOW,
+    });
+
+    expect(result.output).toContain("Retention days: 1");
+    expect(result.output).toContain("Candidates: 1");
+    expect(result.metadata.configFile).toEqual(
+      expect.objectContaining({
+        loaded: true,
+        files: expect.arrayContaining([
+          expect.objectContaining({ kind: "global", loaded: true }),
+        ]),
+      }),
+    );
+    expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
+  it("blocks delete when global config enables deletion but project config cannot be checked", async () => {
+    await writeGlobalConfig(
+      JSON.stringify({ dryRun: false, allowAutoDelete: true }),
+    );
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    const result = await runSessionJanitor({
+      client,
+      currentSessionID: "current",
+      trigger: "startup",
+      now: NOW,
+    });
+
+    expect(result.output).toContain("Mode: validation-error");
+    expect(result.output).toContain(
+      "Project config file skipped because configFileBaseDir is unavailable",
+    );
+    expect(client.session.list).not.toHaveBeenCalled();
+    expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
+  it("loads the default project config file over the global config", async () => {
+    await writeGlobalConfig(JSON.stringify({ retentionDays: 90 }));
     const projectDir = await createTempProject({
       "session-janitor.json": JSON.stringify({ retentionDays: 1 }),
     });
@@ -154,7 +217,13 @@ describe("runSessionJanitor", () => {
       expect(result.output).toContain("Retention days: 1");
       expect(result.output).toContain("Candidates: 1");
       expect(result.metadata.configFile).toEqual(
-        expect.objectContaining({ loaded: true }),
+        expect.objectContaining({
+          loaded: true,
+          files: expect.arrayContaining([
+            expect.objectContaining({ kind: "global", loaded: true }),
+            expect.objectContaining({ kind: "project", loaded: true }),
+          ]),
+        }),
       );
       expect(client.session.delete).not.toHaveBeenCalled();
     } finally {
@@ -187,7 +256,7 @@ describe("runSessionJanitor", () => {
     }
   });
 
-  it("fails before listing when an explicit config file is missing", async () => {
+  it("fails before listing when an explicit project config file is missing", async () => {
     const projectDir = await createTempProject();
     const { client } = createClient([makeSession("old", daysAgo(40))]);
 
@@ -195,13 +264,13 @@ describe("runSessionJanitor", () => {
       const result = await runSessionJanitor({
         client,
         configFileBaseDir: projectDir,
-        pluginOptions: { configFile: ".opencode/missing.json" },
+        pluginOptions: { projectConfigFile: ".opencode/missing.json" },
         currentSessionID: "current",
         now: NOW,
       });
 
       expect(result.output).toContain("Mode: validation-error");
-      expect(result.output).toContain("Failed to read config file");
+      expect(result.output).toContain("Failed to read project config file");
       expect(client.session.list).not.toHaveBeenCalled();
       expect(client.session.delete).not.toHaveBeenCalled();
     } finally {
@@ -209,36 +278,55 @@ describe("runSessionJanitor", () => {
     }
   });
 
-  it("fails before listing when explicit relative configFile has no base directory", async () => {
+  it("fails before listing when explicit relative projectConfigFile has no base directory", async () => {
     const { client } = createClient([makeSession("old", daysAgo(40))]);
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { configFile: ".opencode/session-janitor.json" },
+      pluginOptions: { projectConfigFile: ".opencode/session-janitor.json" },
       currentSessionID: "current",
       now: NOW,
     });
 
     expect(result.output).toContain("Mode: validation-error");
-    expect(result.output).toContain("configFile must be absolute");
+    expect(result.output).toContain("projectConfigFile must be absolute");
     expect(client.session.list).not.toHaveBeenCalled();
     expect(client.session.delete).not.toHaveBeenCalled();
   });
 
-  it("fails before listing when explicit absolute configFile is missing", async () => {
+  it("fails before listing when explicit absolute projectConfigFile is missing", async () => {
     const { client } = createClient([makeSession("old", daysAgo(40))]);
 
     const result = await runSessionJanitor({
       client,
       pluginOptions: {
-        configFile: join(tmpdir(), "missing-session-janitor-config.json"),
+        projectConfigFile: join(
+          tmpdir(),
+          "missing-session-janitor-config.json",
+        ),
       },
       currentSessionID: "current",
       now: NOW,
     });
 
     expect(result.output).toContain("Mode: validation-error");
-    expect(result.output).toContain("Failed to read config file");
+    expect(result.output).toContain("Failed to read project config file");
+    expect(client.session.list).not.toHaveBeenCalled();
+    expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
+  it("fails before listing when globalConfigFile is relative", async () => {
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    const result = await runSessionJanitor({
+      client,
+      pluginOptions: { globalConfigFile: "session-janitor.json" },
+      currentSessionID: "current",
+      now: NOW,
+    });
+
+    expect(result.output).toContain("Mode: validation-error");
+    expect(result.output).toContain("globalConfigFile must be absolute");
     expect(client.session.list).not.toHaveBeenCalled();
     expect(client.session.delete).not.toHaveBeenCalled();
   });
@@ -267,6 +355,23 @@ describe("runSessionJanitor", () => {
     }
   });
 
+  it("fails before listing when the global config file contains invalid JSON", async () => {
+    await writeGlobalConfig("{ invalid");
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    const result = await runSessionJanitor({
+      client,
+      currentSessionID: "current",
+      trigger: "sessionIdle",
+      now: NOW,
+    });
+
+    expect(result.output).toContain("Mode: validation-error");
+    expect(result.output).toContain("invalid JSON");
+    expect(client.session.list).not.toHaveBeenCalled();
+    expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
   it("blocks delete mode when config file options have warnings", async () => {
     const projectDir = await createTempProject({
       "session-janitor.json": JSON.stringify({
@@ -287,12 +392,39 @@ describe("runSessionJanitor", () => {
       });
 
       expect(result.output).toContain("Mode: validation-error");
-      expect(result.output).toContain("Unknown config file key ignored: typo");
+      expect(result.output).toContain(
+        "Unknown project config file key ignored: typo",
+      );
       expect(client.session.list).not.toHaveBeenCalled();
       expect(client.session.delete).not.toHaveBeenCalled();
     } finally {
       await rm(projectDir, { recursive: true, force: true });
     }
+  });
+
+  it("blocks delete mode when global config file options have warnings", async () => {
+    await writeGlobalConfig(
+      JSON.stringify({
+        dryRun: false,
+        allowAutoDelete: true,
+        typo: true,
+      }),
+    );
+    const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    const result = await runSessionJanitor({
+      client,
+      currentSessionID: "current",
+      trigger: "startup",
+      now: NOW,
+    });
+
+    expect(result.output).toContain("Mode: validation-error");
+    expect(result.output).toContain(
+      "Unknown global config file key ignored: typo",
+    );
+    expect(client.session.list).not.toHaveBeenCalled();
+    expect(client.session.delete).not.toHaveBeenCalled();
   });
 
   it("reports session.list failures without deleting", async () => {
@@ -314,7 +446,11 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
       currentSessionID: "current",
       trigger: "startup",
       now: NOW,
@@ -401,7 +537,11 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
       currentSessionID: "current",
       trigger: "startup",
       abortSignal: controller.signal,
@@ -462,7 +602,11 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
       currentSessionID: "current",
       trigger: "startup",
       now: NOW,
@@ -485,6 +629,7 @@ describe("runSessionJanitor", () => {
       pluginOptions: {
         dryRun: false,
         allowAutoDelete: true,
+        projectConfigFile: false,
         maxDeleteCount: 2,
       },
       currentSessionID: "current",
@@ -513,7 +658,11 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
       currentSessionID: "current",
       trigger: "startup",
       now: NOW,
@@ -538,6 +687,7 @@ describe("runSessionJanitor", () => {
         dryRun: false,
         allowAutoDelete: true,
         includeShared: true,
+        projectConfigFile: false,
       },
       currentSessionID: "current",
       trigger: "startup",
@@ -560,6 +710,7 @@ describe("runSessionJanitor", () => {
         dryRun: false,
         allowAutoDelete: true,
         excludeCurrentSession: false,
+        projectConfigFile: false,
       },
       currentSessionID: "current",
       trigger: "startup",
@@ -593,7 +744,11 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
       trigger: "startup",
       now: NOW,
     });
@@ -609,7 +764,11 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
       currentSessionID: "current",
       trigger: "startup",
       now: NOW,
@@ -636,7 +795,11 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
       currentSessionID: "current",
       trigger: "startup",
       now: NOW,
@@ -671,7 +834,11 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
       currentSessionID: "current",
       trigger: "startup",
       abortSignal: controller.signal,
@@ -706,7 +873,11 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
       currentSessionID: "current",
       trigger: "startup",
       abortSignal: controller.signal,
@@ -743,7 +914,11 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
       currentSessionID: "current",
       trigger: "startup",
       now: NOW,
@@ -765,7 +940,11 @@ describe("runSessionJanitor", () => {
 
     const result = await runSessionJanitor({
       client,
-      pluginOptions: { dryRun: false, allowAutoDelete: true },
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
       currentSessionID: "current",
       trigger: "startup",
       now: NOW,
@@ -866,4 +1045,15 @@ async function createTempProject(
   }
 
   return projectDir;
+}
+
+async function writeGlobalConfig(content: string): Promise<void> {
+  const configHome = process.env.XDG_CONFIG_HOME;
+  if (!configHome) {
+    throw new Error("XDG_CONFIG_HOME must be set for this test");
+  }
+
+  const opencodeDir = join(configHome, "opencode");
+  await mkdir(opencodeDir, { recursive: true });
+  await writeFile(join(opencodeDir, "session-janitor.json"), content, "utf8");
 }

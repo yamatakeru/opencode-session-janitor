@@ -9,6 +9,8 @@
 - Changed plugin startup to run an initial forced dry-run, then wait for a session ID before any auto delete.
 - Added best-effort TUI toast summaries via `notifyTui`.
 - Allowed explicit `includeShared: true` startup auto delete to delete old shared sessions.
+- Added user-wide config loading from `~/.config/opencode/session-janitor.json` with project config overriding global config.
+- Replaced the `configFile` plugin option with `globalConfigFile` and `projectConfigFile`.
 - Removed `minSessionsToKeep` from cleanup configuration.
 - Added `maxDeleteCount: "unlimited"` as an explicit no-cap delete-count option.
 
