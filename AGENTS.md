@@ -10,13 +10,15 @@ documentation.
 
 ## Current Scope
 
-Stage 2 is implemented: OpenCode plugin startup runs perform a dry-run session
-cleanup evaluation. The manual `session_janitor` custom tool has been removed
+Current implementation: OpenCode plugin startup runs perform a dry-run session
+cleanup evaluation, with explicit opt-in startup auto delete available behind
+strong safety gates. The manual `session_janitor` custom tool has been removed
 from the agent-callable surface.
 
 Implemented:
 
 - startup dry-run
+- explicit opt-in startup auto delete
 - no agent-callable custom tool
 - dry-run evaluation
 - explicit delete mode
@@ -26,7 +28,6 @@ Implemented:
 
 Not implemented:
 
-- automatic deletion
 - scheduled or background cleanup
 
 Do not expand beyond the current stage unless the user explicitly asks.
@@ -37,7 +38,8 @@ Preserve these behaviors:
 
 - `dryRun` defaults to `true`.
 - Delete mode only runs when `dryRun: false` is explicitly configured or passed.
-- Shared sessions are protected by default.
+- Shared sessions are protected by default and may be deleted by startup auto
+  delete only when `includeShared: true` is explicitly configured.
 - The current session is protected by default.
 - Sessions with missing, invalid, or ambiguous timestamps are skipped.
 - Config validation failures must prevent deletion.
@@ -77,13 +79,11 @@ npm run format
 
 ## Future Stage Guardrails
 
-Stage 2 introduces startup dry-run only. It must not delete sessions.
+Startup auto delete is allowed only behind strong gates such as `dryRun: false`
+and `allowAutoDelete: true`.
 
-Stage 3 may add explicit opt-in auto-delete, but only behind strong gates such
-as `dryRun: false` and `allowAutoDelete: true`.
-
-Do not introduce startup deletion, background deletion, or relaxed safety rules
-as incidental refactors.
+Do not introduce background deletion, scheduled deletion, or relaxed safety
+rules as incidental refactors.
 
 ## Documentation Policy
 

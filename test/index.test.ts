@@ -187,6 +187,52 @@ describe("SessionJanitorPlugin", () => {
     }
   });
 
+  it("runs startup auto delete for shared sessions when includeShared is enabled", async () => {
+    const client = {
+      session: {
+        list: vi.fn(async () => ({
+          data: [
+            makeSession("shared", daysAgo(40), {
+              share: { url: "https://example.com/s/shared" },
+            }),
+          ],
+        })),
+        delete: vi.fn(async () => ({ data: true })),
+      },
+      app: {
+        log: vi.fn(async () => ({ data: true })),
+      },
+    };
+
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    try {
+      const hooks = await SessionJanitorPlugin(createPluginInput(client), {
+        configFile: false,
+        dryRun: false,
+        allowAutoDelete: true,
+        includeShared: true,
+      });
+
+      await hooks.event?.({
+        event: {
+          type: "session.idle",
+          properties: { sessionID: "current" },
+        } as never,
+      });
+
+      await vi.waitFor(() =>
+        expect(client.session.delete).toHaveBeenCalledOnce(),
+      );
+      expect(client.session.delete).toHaveBeenCalledWith({
+        path: { id: "shared" },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("waits for the startup dry-run before auto delete", async () => {
     let resolveDryRunList: (value: {
       data: ReturnType<typeof makeSession>[];

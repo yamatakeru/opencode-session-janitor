@@ -38,8 +38,6 @@ const autoDeleteRequiresAllowWarning =
   "dryRun:false ignored because startup auto delete requires allowAutoDelete:true.";
 const autoDeleteRequiresCurrentSessionProtectionWarning =
   "dryRun:false ignored because startup auto delete requires excludeCurrentSession:true.";
-const autoDeleteSharedUnsupportedWarning =
-  "dryRun:false ignored because startup auto delete does not support includeShared:true.";
 const nonStartupDryRunWarning =
   "dryRun:false ignored because automatic deletion is only supported for trigger:startup.";
 
@@ -403,10 +401,6 @@ function getAutoDeleteGateWarnings(
   if (!config.excludeCurrentSession) {
     warnings.push(autoDeleteRequiresCurrentSessionProtectionWarning);
   }
-  if (config.includeShared) {
-    warnings.push(autoDeleteSharedUnsupportedWarning);
-  }
-
   return warnings;
 }
 

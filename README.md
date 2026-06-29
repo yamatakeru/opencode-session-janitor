@@ -113,7 +113,8 @@ listing or deleting sessions.
 - Startup auto delete requires `dryRun: false` and `allowAutoDelete: true`.
 - First run with `dryRun: true` is strongly recommended before enabling delete.
 - Shared sessions and the current session are protected by default.
-- Startup auto delete currently refuses `includeShared: true`.
+- Setting `includeShared: true` allows startup auto delete to delete old shared
+  sessions, which may invalidate shared URLs.
 - Sessions with missing, invalid, or ambiguous metadata are skipped.
 - Delete mode refuses to run if the current session cannot be identified while
   current-session protection is enabled.

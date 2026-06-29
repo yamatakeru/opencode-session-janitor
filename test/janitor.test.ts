@@ -525,8 +525,12 @@ describe("runSessionJanitor", () => {
     expect(result.output).toContain("shared_session: 1");
   });
 
-  it("does not auto delete when includeShared is enabled", async () => {
-    const { client } = createClient([makeSession("old", daysAgo(40))]);
+  it("auto deletes shared sessions when includeShared is enabled", async () => {
+    const { client } = createClient([
+      makeSession("shared", daysAgo(40), {
+        share: { url: "https://example.com/s/shared" },
+      }),
+    ]);
 
     const result = await runSessionJanitor({
       client,
@@ -540,11 +544,11 @@ describe("runSessionJanitor", () => {
       now: NOW,
     });
 
-    expect(result.output).toContain("Mode: dry-run");
-    expect(result.output).toContain(
-      "startup auto delete does not support includeShared:true",
-    );
-    expect(client.session.delete).not.toHaveBeenCalled();
+    expect(result.output).toContain("Mode: delete");
+    expect(result.output).toContain("Deleted: 1");
+    expect(client.session.delete).toHaveBeenCalledWith({
+      path: { id: "shared" },
+    });
   });
 
   it("does not auto delete when current-session protection is disabled", async () => {

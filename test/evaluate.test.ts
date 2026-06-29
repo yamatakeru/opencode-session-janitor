@@ -87,6 +87,28 @@ describe("evaluateSessions", () => {
     );
   });
 
+  it("includes shared sessions when explicitly enabled", () => {
+    const result = evaluateSessions({
+      sessions: [
+        makeSession("shared", daysAgo(40), {
+          share: { url: "https://example.com/s/shared" },
+        }),
+      ],
+      config: { ...defaultSessionJanitorConfig, includeShared: true },
+      currentSessionID: "current",
+      now: NOW,
+    });
+
+    expect(result.candidates).toEqual([
+      expect.objectContaining({
+        id: "shared",
+        shared: true,
+        reason: "older_than_retention",
+      }),
+    ]);
+    expect(result.skipped).toHaveLength(0);
+  });
+
   it("skips the current session by default", () => {
     const result = evaluateSessions({
       sessions: [makeSession("current", daysAgo(40))],

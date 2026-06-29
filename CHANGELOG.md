@@ -8,6 +8,7 @@
 - Added explicit opt-in startup auto delete behind `dryRun: false` and `allowAutoDelete: true`.
 - Changed plugin startup to run an initial forced dry-run, then wait for a session ID before any auto delete.
 - Added best-effort TUI toast summaries via `notifyTui`.
+- Allowed explicit `includeShared: true` startup auto delete to delete old shared sessions.
 - Removed `minSessionsToKeep` from cleanup configuration.
 - Added `maxDeleteCount: "unlimited"` as an explicit no-cap delete-count option.
 
