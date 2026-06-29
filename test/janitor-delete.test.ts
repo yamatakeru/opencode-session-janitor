@@ -8,7 +8,10 @@ useTempConfigHome();
 
 describe("runSessionJanitor delete mode", () => {
   it("allows startup delete only when auto delete gates are satisfied", async () => {
-    const { client } = createClient([makeSession("old", daysAgo(40))]);
+    const { client } = createClient([
+      makeSession("current", daysAgo(1)),
+      makeSession("old", daysAgo(40)),
+    ]);
 
     const result = await runSessionJanitor({
       client,
@@ -29,6 +32,7 @@ describe("runSessionJanitor delete mode", () => {
 
   it("applies maxDeleteCount during startup auto delete", async () => {
     const { client } = createClient([
+      makeSession("current", daysAgo(1)),
       makeSession("oldest", daysAgo(70)),
       makeSession("middle", daysAgo(60)),
       makeSession("newest-old", daysAgo(50)),
@@ -86,6 +90,7 @@ describe("runSessionJanitor delete mode", () => {
 
   it("auto deletes shared sessions when includeShared is enabled", async () => {
     const { client } = createClient([
+      makeSession("current", daysAgo(1)),
       makeSession("shared", daysAgo(40), {
         share: { url: "https://example.com/s/shared" },
       }),
@@ -154,8 +159,40 @@ describe("runSessionJanitor delete mode", () => {
     expect(client.session.delete).not.toHaveBeenCalled();
   });
 
-  it("deletes candidates only when dryRun is false", async () => {
+  it("fails closed after listing when current session is not in the session list", async () => {
     const { client } = createClient([makeSession("old", daysAgo(40))]);
+
+    const result = await runSessionJanitor({
+      client,
+      pluginOptions: {
+        dryRun: false,
+        allowAutoDelete: true,
+        projectConfigFile: false,
+      },
+      currentSessionID: "current",
+      trigger: "startup",
+      now: NOW,
+    });
+
+    expect(result.output).toContain("Mode: guard-error");
+    expect(result.output).toContain(
+      "Sessions were listed, but no sessions were deleted",
+    );
+    expect(result.output).toContain(
+      "Current session ID was not found in the session list",
+    );
+    expect(result.metadata.error).toBe(
+      "Current session ID was not found in the session list, so current-session protection cannot be verified.",
+    );
+    expect(client.session.list).toHaveBeenCalledOnce();
+    expect(client.session.delete).not.toHaveBeenCalled();
+  });
+
+  it("deletes candidates only when dryRun is false", async () => {
+    const { client } = createClient([
+      makeSession("current", daysAgo(1)),
+      makeSession("old", daysAgo(40)),
+    ]);
 
     const result = await runSessionJanitor({
       client,
@@ -178,15 +215,18 @@ describe("runSessionJanitor delete mode", () => {
   it("continues after partial delete failure", async () => {
     const old = makeSession("old", daysAgo(50));
     const older = makeSession("older", daysAgo(60));
-    const { client } = createClient([old, older], async (id) => {
-      if (id === "older") {
-        return {
-          data: undefined,
-          error: { message: "cannot delete", code: "E_DELETE", status: 500 },
-        };
-      }
-      return { data: true };
-    });
+    const { client } = createClient(
+      [makeSession("current", daysAgo(1)), old, older],
+      async (id) => {
+        if (id === "older") {
+          return {
+            data: undefined,
+            error: { message: "cannot delete", code: "E_DELETE", status: 500 },
+          };
+        }
+        return { data: true };
+      },
+    );
 
     const result = await runSessionJanitor({
       client,
@@ -216,6 +256,7 @@ describe("runSessionJanitor delete mode", () => {
   it("aborts delete loop after an unexpected delete exception", async () => {
     const { client } = createClient(
       [
+        makeSession("current", daysAgo(1)),
         makeSession("oldest", daysAgo(70)),
         makeSession("middle", daysAgo(60)),
         makeSession("newest-old", daysAgo(50)),
@@ -247,7 +288,11 @@ describe("runSessionJanitor delete mode", () => {
 
   it("aborts delete loop on malformed delete responses", async () => {
     const { client } = createClient(
-      [makeSession("oldest", daysAgo(70)), makeSession("middle", daysAgo(60))],
+      [
+        makeSession("current", daysAgo(1)),
+        makeSession("oldest", daysAgo(70)),
+        makeSession("middle", daysAgo(60)),
+      ],
       async () => ({ data: "true" }),
     );
 

@@ -132,6 +132,8 @@ or deleting sessions.
 - Sessions with missing, invalid, or ambiguous metadata are skipped.
 - Delete mode refuses to run if the current session cannot be identified while
   current-session protection is enabled.
+- Delete mode also refuses to run if the trusted current session ID is not
+  present in OpenCode's session list.
 - Startup auto delete waits for a trusted `chat.message` or
   `command.execute.before` hook before deleting, and does not use
   `session.idle` or `session.status` events as the current-session source.
@@ -161,6 +163,11 @@ trusted session ID. If neither trusted hook is observed, auto delete does not
 run. `session.idle` auto delete is intentionally not enabled in this version
 because its trigger timing is harder to reason about safely.
 
+If a later trusted hook reports a different session ID while startup auto delete
+is still running, the plugin cancels the remaining delete loop on a best-effort
+basis. An individual `session.delete` call that is already in flight may still
+complete because OpenCode deletion is irreversible once processed.
+
 ## Current Scope
 
 This version implements startup dry-run and explicit opt-in startup auto delete.
@@ -176,6 +183,22 @@ npm run build
 ```
 
 `npm run format` checks formatting with Prettier.
+
+## Runtime Smoke Test
+
+Before releasing startup auto delete changes, test against a disposable OpenCode
+environment because deletion is irreversible.
+
+1. Install the local plugin and configure `dryRun: false`,
+   `allowAutoDelete: true`, `excludeCurrentSession: true`,
+   `trigger: "startup"`, and a small `maxDeleteCount`.
+2. Start OpenCode, send a normal chat message, and confirm the app log shows the
+   startup dry-run followed by at most one delete run.
+3. Repeat with an OpenCode command that triggers `command.execute.before`.
+4. Confirm no guard error says the current session ID was missing from the
+   session list.
+5. If the active test session is old enough to be a delete candidate, confirm it
+   is skipped with reason `current_session`.
 
 For local plugin development, prefer installing the package into the OpenCode
 project or using a small auto-discovered wrapper instead of pointing config at a

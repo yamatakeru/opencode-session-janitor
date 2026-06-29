@@ -211,6 +211,30 @@ export async function runSessionJanitor({
     );
   }
 
+  if (
+    !config.dryRun &&
+    config.excludeCurrentSession &&
+    verifiedCurrentSessionID !== undefined &&
+    !sessions.some((session) => session.id === verifiedCurrentSessionID)
+  ) {
+    const message =
+      "Current session ID was not found in the session list, so current-session protection cannot be verified.";
+    const metadata = {
+      ok: false,
+      trigger,
+      mode,
+      error: message,
+      config,
+      warnings,
+      configFile: configFileMetadata,
+    };
+    return finalizeRun("error", "Session janitor guard failed", {
+      title: "Session janitor guard failed",
+      output: renderGuardError(message, warnings, { sessionsListed: true }),
+      metadata,
+    });
+  }
+
   let evaluation: EvaluationResult;
   try {
     evaluation = evaluateSessions({

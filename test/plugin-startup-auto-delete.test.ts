@@ -16,7 +16,12 @@ describe("SessionJanitorPlugin startup auto delete", () => {
   it("runs startup auto delete once after observing a trusted chat session ID", async () => {
     const client = {
       session: {
-        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        list: vi.fn(async () => ({
+          data: [
+            makeSession("current", daysAgo(1)),
+            makeSession("old", daysAgo(40)),
+          ],
+        })),
         delete: vi.fn(async () => ({ data: true })),
       },
       app: {
@@ -71,7 +76,12 @@ describe("SessionJanitorPlugin startup auto delete", () => {
     );
     const client = {
       session: {
-        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        list: vi.fn(async () => ({
+          data: [
+            makeSession("current", daysAgo(1)),
+            makeSession("old", daysAgo(40)),
+          ],
+        })),
         delete: vi.fn(async () => ({ data: true })),
       },
       app: {
@@ -96,6 +106,7 @@ describe("SessionJanitorPlugin startup auto delete", () => {
       session: {
         list: vi.fn(async () => ({
           data: [
+            makeSession("current", daysAgo(1)),
             makeSession("shared", daysAgo(40), {
               share: { url: "https://example.com/s/shared" },
             }),
@@ -147,7 +158,10 @@ describe("SessionJanitorPlugin startup auto delete", () => {
           .fn()
           .mockImplementationOnce(() => dryRunList)
           .mockImplementationOnce(async () => ({
-            data: [makeSession("old", daysAgo(40))],
+            data: [
+              makeSession("current", daysAgo(1)),
+              makeSession("old", daysAgo(40)),
+            ],
           })),
         delete: vi.fn(async () => ({ data: true })),
       },
@@ -167,7 +181,12 @@ describe("SessionJanitorPlugin startup auto delete", () => {
     await vi.waitFor(() => expect(client.session.list).toHaveBeenCalledOnce());
     expect(client.session.delete).not.toHaveBeenCalled();
 
-    resolveDryRunList!({ data: [makeSession("old", daysAgo(40))] });
+    resolveDryRunList!({
+      data: [
+        makeSession("current", daysAgo(1)),
+        makeSession("old", daysAgo(40)),
+      ],
+    });
     await vi.waitFor(() =>
       expect(client.session.delete).toHaveBeenCalledOnce(),
     );

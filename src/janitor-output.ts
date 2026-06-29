@@ -37,11 +37,17 @@ export function renderValidationError(
   ].join("\n");
 }
 
-export function renderGuardError(error: string, warnings: string[]): string {
+export function renderGuardError(
+  error: string,
+  warnings: string[],
+  options: { sessionsListed?: boolean } = {},
+): string {
   return [
     "opencode-session-janitor",
     "Mode: guard-error",
-    "No sessions were listed or deleted because a safety guard failed.",
+    options.sessionsListed === true
+      ? "Sessions were listed, but no sessions were deleted because a safety guard failed."
+      : "No sessions were listed or deleted because a safety guard failed.",
     "",
     `Error: ${error}`,
     ...renderWarnings(warnings),

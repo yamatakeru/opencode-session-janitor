@@ -16,7 +16,12 @@ describe("SessionJanitorPlugin trusted session hooks", () => {
   it("does not register session.idle or session.status event handling", async () => {
     const client = {
       session: {
-        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        list: vi.fn(async () => ({
+          data: [
+            makeSession("current", daysAgo(1)),
+            makeSession("old", daysAgo(40)),
+          ],
+        })),
         delete: vi.fn(async () => ({ data: true })),
       },
       app: {
@@ -38,7 +43,12 @@ describe("SessionJanitorPlugin trusted session hooks", () => {
   it("does not auto delete until a trusted session hook is observed", async () => {
     const client = {
       session: {
-        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        list: vi.fn(async () => ({
+          data: [
+            makeSession("current", daysAgo(1)),
+            makeSession("old", daysAgo(40)),
+          ],
+        })),
         delete: vi.fn(async () => ({ data: true })),
       },
       app: {
@@ -61,7 +71,12 @@ describe("SessionJanitorPlugin trusted session hooks", () => {
   it("runs startup auto delete once from command.execute.before", async () => {
     const client = {
       session: {
-        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        list: vi.fn(async () => ({
+          data: [
+            makeSession("current", daysAgo(1)),
+            makeSession("old", daysAgo(40)),
+          ],
+        })),
         delete: vi.fn(async () => ({ data: true })),
       },
       app: {
@@ -89,7 +104,12 @@ describe("SessionJanitorPlugin trusted session hooks", () => {
   it("runs startup auto delete once when both trusted hooks are observed", async () => {
     const client = {
       session: {
-        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        list: vi.fn(async () => ({
+          data: [
+            makeSession("current", daysAgo(1)),
+            makeSession("old", daysAgo(40)),
+          ],
+        })),
         delete: vi.fn(async () => ({ data: true })),
       },
       app: {
@@ -150,7 +170,12 @@ describe("SessionJanitorPlugin trusted session hooks", () => {
   it("ignores blank trusted session IDs without consuming the auto delete latch", async () => {
     const client = {
       session: {
-        list: vi.fn(async () => ({ data: [makeSession("old", daysAgo(40))] })),
+        list: vi.fn(async () => ({
+          data: [
+            makeSession("current", daysAgo(1)),
+            makeSession("old", daysAgo(40)),
+          ],
+        })),
         delete: vi.fn(async () => ({ data: true })),
       },
       app: {

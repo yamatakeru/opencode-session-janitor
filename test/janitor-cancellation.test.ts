@@ -72,7 +72,10 @@ describe("runSessionJanitor cancellation", () => {
         return undefined;
       },
     });
-    const { client } = createClient([session]);
+    const { client } = createClient([
+      makeSession("current", daysAgo(1)),
+      session,
+    ]);
 
     const result = await runSessionJanitor({
       client,
@@ -98,6 +101,7 @@ describe("runSessionJanitor cancellation", () => {
     const controller = new AbortController();
     const { client } = createClient(
       [
+        makeSession("current", daysAgo(1)),
         makeSession("oldest", daysAgo(70)),
         makeSession("middle", daysAgo(60)),
         makeSession("newest-old", daysAgo(50)),
@@ -140,7 +144,7 @@ describe("runSessionJanitor cancellation", () => {
   it("reports cancellation during the final in-flight delete", async () => {
     const controller = new AbortController();
     const { client } = createClient(
-      [makeSession("old", daysAgo(40))],
+      [makeSession("current", daysAgo(1)), makeSession("old", daysAgo(40))],
       async () => {
         controller.abort();
         return { data: true };
