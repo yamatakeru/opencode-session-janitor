@@ -228,7 +228,27 @@ describe("SessionJanitorPlugin startup auto delete", () => {
     pluginOptions.retentionDays = 10;
     await observeChatMessage(hooks);
 
+    await vi.waitFor(() =>
+      expect(client.app.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            level: "error",
+            message: "Session janitor startup auto delete blocked",
+            extra: expect.objectContaining({
+              autoDeleteTrigger: "startup-armed",
+              trustedSessionSource: "chat.message",
+              errors: expect.arrayContaining([
+                expect.stringContaining(
+                  "config changed after the startup dry-run",
+                ),
+              ]),
+            }),
+          }),
+        }),
+      ),
+    );
     expect(client.session.delete).not.toHaveBeenCalled();
+    expect(client.session.list).toHaveBeenCalledOnce();
   });
 
   it("logs when startup auto delete is blocked after the startup dry-run", async () => {
